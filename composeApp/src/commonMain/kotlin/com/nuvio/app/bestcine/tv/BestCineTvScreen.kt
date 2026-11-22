@@ -98,6 +98,8 @@ import com.nuvio.app.core.ui.isFullscreenActionActive
 import com.nuvio.app.core.ui.isFullscreenActionSupported
 import com.nuvio.app.core.ui.nuvio
 import com.nuvio.app.core.ui.toggleFullscreenAction
+import com.nuvio.app.features.player.HidePlayerSystemBars
+import com.nuvio.app.features.player.LockPlayerToLandscape
 import com.nuvio.app.features.player.ManagePlayerPictureInPicture
 import com.nuvio.app.features.player.PlatformPlayerSurface
 import com.nuvio.app.features.player.PlayerControlsAction
@@ -187,6 +189,11 @@ internal fun BestCineTvScreen(
 
     PlatformBackHandler(enabled = isSelectedTab && isFullscreen) {
         exitFullscreen()
+    }
+
+    if (isSelectedTab && isFullscreen && !isInPip) {
+        LockPlayerToLandscape()
+        HidePlayerSystemBars()
     }
 
     LaunchedEffect(Unit) {
