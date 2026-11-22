@@ -84,10 +84,10 @@ internal object DiscordPresenceManager {
     }
 }
 
-private val BestCineLogoUrl = "${BestCineBranding.PRODUCTION_BASE_URL}/logo.png"
+private const val BestCineLogoAssetKey = "bestcine_logo"
 
 private val DefaultBestCineAssets = DiscordActivityAssets(
-    largeImage = BestCineLogoUrl,
+    largeImage = BestCineLogoAssetKey,
     largeText = BestCineBranding.APP_NAME,
 )
 
@@ -159,7 +159,7 @@ private fun PresenceSnapshot.toDiscordActivity(): DiscordActivity = when (this) 
                 null
             },
             assets = DiscordActivityAssets(
-                largeImage = posterUrl?.takeIf { it.isNotBlank() } ?: BestCineLogoUrl,
+                largeImage = posterUrl?.takeIf { it.isNotBlank() } ?: BestCineLogoAssetKey,
                 largeText = title,
             ),
         )
