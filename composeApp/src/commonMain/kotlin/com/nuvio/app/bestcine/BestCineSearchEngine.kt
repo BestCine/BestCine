@@ -131,33 +131,42 @@ object BestCineSearchEngine {
         }
 
         // 3. Mescla sem duplicatas (priorizando matches locais PT-BR -> IMDb PT-BR -> Cinemeta)
-        val mergedMovies = mergeUniqueById(
-            localMatches.filter { it.type == "movie" },
-            imdbItems.filter { it.type == "movie" },
-            cinemetaMovies,
+        val mergedMovies = deduplicateSearchItems(
+            mergeUniqueById(
+                localMatches.filter { it.type == "movie" },
+                imdbItems.filter { it.type == "movie" },
+                cinemetaMovies,
+            ),
         )
-        val mergedSeries = mergeUniqueById(
-            localMatches.filter { it.type == "series" },
-            imdbItems.filter { it.type == "series" },
-            cinemetaSeries,
+        val mergedSeries = deduplicateSearchItems(
+            mergeUniqueById(
+                localMatches.filter { it.type == "series" },
+                imdbItems.filter { it.type == "series" },
+                cinemetaSeries,
+            ),
         )
 
         // 4. Traduz os primeiros resultados para Português (PT-BR) via /meta/ do BestCine (com cache em RAM)
+        //    e deduplica novamente após a tradução (unifica pares tmdb:... e tt... com mesmo título/ano/capa).
         val (localizedMovies, localizedSeries) = coroutineScope {
             val moviesAsync = async {
-                localizeItemsToPtBr(
-                    items = mergedMovies,
-                    type = "movie",
-                    bestCineTransportUrl = bestCineTransportUrl,
-                    localById = localById,
+                deduplicateSearchItems(
+                    localizeItemsToPtBr(
+                        items = mergedMovies,
+                        type = "movie",
+                        bestCineTransportUrl = bestCineTransportUrl,
+                        localById = localById,
+                    ),
                 )
             }
             val seriesAsync = async {
-                localizeItemsToPtBr(
-                    items = mergedSeries,
-                    type = "series",
-                    bestCineTransportUrl = bestCineTransportUrl,
-                    localById = localById,
+                deduplicateSearchItems(
+                    localizeItemsToPtBr(
+                        items = mergedSeries,
+                        type = "series",
+                        bestCineTransportUrl = bestCineTransportUrl,
+                        localById = localById,
+                    ),
                 )
             }
             moviesAsync.await() to seriesAsync.await()
@@ -332,12 +341,97 @@ object BestCineSearchEngine {
         val out = ArrayList<MetaPreview>()
         lists.forEach { list ->
             list.forEach { item ->
-                if (item.id.isNotBlank() && seen.add(item.id)) {
+                val normId = item.id.trim().lowercase()
+                if (normId.isNotBlank() && seen.add(normId)) {
                     out.add(item)
                 }
             }
         }
         return out
+    }
+
+    private fun deduplicateSearchItems(items: List<MetaPreview>): List<MetaPreview> {
+        if (items.size <= 1) return items
+        val result = ArrayList<MetaPreview>(items.size)
+        val indexById = HashMap<String, Int>()
+        val indexByPoster = HashMap<String, Int>()
+        val indexByTitleYear = HashMap<String, Int>()
+        val indexByTitleOnly = HashMap<String, Int>()
+
+        for (item in items) {
+            val normId = item.id.trim().lowercase()
+            if (normId.isEmpty()) continue
+            val normTitle = normalizeForSearch(item.name)
+            val year = extractYear(item.releaseInfo)
+            val posterKey = extractTmdbPosterKey(item.poster)
+            val titleYearKey = if (normTitle.isNotEmpty() && year != null) "$normTitle|$year" else null
+
+            val existingIdx = indexById[normId]
+                ?: posterKey?.let { indexByPoster[it] }
+                ?: titleYearKey?.let { indexByTitleYear[it] }
+                ?: if (normTitle.isNotEmpty() && year == null) {
+                    indexByTitleOnly[normTitle]
+                } else if (normTitle.isNotEmpty()) {
+                    indexByTitleOnly[normTitle]?.takeIf { extractYear(result[it].releaseInfo) == null }
+                } else {
+                    null
+                }
+
+            if (existingIdx != null) {
+                val merged = mergeDuplicatePair(result[existingIdx], item)
+                result[existingIdx] = merged
+                indexById[merged.id.trim().lowercase()] = existingIdx
+                indexById[normId] = existingIdx
+                extractTmdbPosterKey(merged.poster)?.let { indexByPoster[it] = existingIdx }
+                val mergedTitle = normalizeForSearch(merged.name)
+                val mergedYear = extractYear(merged.releaseInfo)
+                if (mergedTitle.isNotEmpty()) {
+                    if (mergedTitle !in indexByTitleOnly) indexByTitleOnly[mergedTitle] = existingIdx
+                    if (mergedYear != null) indexByTitleYear["$mergedTitle|$mergedYear"] = existingIdx
+                }
+            } else {
+                val idx = result.size
+                result.add(item)
+                indexById[normId] = idx
+                posterKey?.let { indexByPoster[it] = idx }
+                if (normTitle.isNotEmpty()) {
+                    if (normTitle !in indexByTitleOnly) indexByTitleOnly[normTitle] = idx
+                    if (titleYearKey != null) indexByTitleYear[titleYearKey] = idx
+                }
+            }
+        }
+        return result
+    }
+
+    private fun mergeDuplicatePair(first: MetaPreview, second: MetaPreview): MetaPreview {
+        val firstIsImdb = first.id.startsWith("tt", ignoreCase = true)
+        val secondIsImdb = second.id.startsWith("tt", ignoreCase = true)
+        // Preferimos manter o ID IMDb (tt...) para compatibilidade direta com streams/legendas,
+        // preservando os melhores metadados PT-BR (título, capa, sinopse e nota) do primeiro card.
+        val canonicalId = if (!firstIsImdb && secondIsImdb) second.id else first.id
+        return first.copy(
+            id = canonicalId,
+            name = first.name.ifBlank { second.name },
+            poster = first.poster?.takeIf { it.isNotBlank() } ?: second.poster,
+            banner = first.banner?.takeIf { it.isNotBlank() } ?: second.banner,
+            logo = first.logo?.takeIf { it.isNotBlank() } ?: second.logo,
+            description = first.description?.takeIf { it.isNotBlank() } ?: second.description,
+            releaseInfo = first.releaseInfo?.takeIf { it.isNotBlank() } ?: second.releaseInfo,
+            imdbRating = first.imdbRating?.takeIf { it.isNotBlank() } ?: second.imdbRating,
+            genres = first.genres.ifEmpty { second.genres },
+        )
+    }
+
+    private val yearRegex = Regex("\\b(19\\d{2}|20\\d{2})\\b")
+
+    private fun extractYear(releaseInfo: String?): String? =
+        releaseInfo?.let { yearRegex.find(it)?.groupValues?.getOrNull(1) }
+
+    private fun extractTmdbPosterKey(poster: String?): String? {
+        val raw = poster?.trim()?.lowercase() ?: return null
+        if (!raw.contains("image.tmdb.org/t/p/")) return null
+        val file = raw.substringBefore('?').substringAfterLast('/')
+        return file.takeIf { it.length >= 6 && (it.endsWith(".jpg") || it.endsWith(".jpeg") || it.endsWith(".png") || it.endsWith(".webp")) }
     }
 
     private fun matchesQueryPtBr(item: MetaPreview, query: String): Boolean {
