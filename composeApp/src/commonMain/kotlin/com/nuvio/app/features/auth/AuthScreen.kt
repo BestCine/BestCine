@@ -85,6 +85,8 @@ import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.nuvio.app.bestcine.BestCineAccountRepository
 import com.nuvio.app.bestcine.BestCineBranding
+import com.nuvio.app.bestcine.BestCineQrCodeView
+import com.nuvio.app.rememberIsAndroidTv
 import com.nuvio.app.core.auth.AuthRepository
 import com.nuvio.app.core.auth.DeviceLinkAuthRepository
 import com.nuvio.app.core.auth.DeviceLinkAuthState
@@ -701,12 +703,27 @@ private fun AuthForm(
     onEmailBoundsChange: (Rect) -> Unit,
     onPasswordBoundsChange: (Rect) -> Unit,
 ) {
-    val scope = rememberCoroutineScope()
+    val isAndroidTv = rememberIsAndroidTv()
     val bestCineState by BestCineAccountRepository.state.collectAsStateWithLifecycle()
+    val tvQrState by BestCineAccountRepository.tvQrState.collectAsStateWithLifecycle()
     val busy = isLoading || bestCineState.isLoggingIn || bestCineState.isSyncingManifest
+    var showQrLogin by rememberSaveable { mutableStateOf(false) }
+
+    LaunchedEffect(isAndroidTv) {
+        if (isAndroidTv && !showQrLogin) {
+            showQrLogin = true
+            BestCineAccountRepository.startTvQrLogin(BestCineBranding.PRODUCTION_BASE_URL)
+        }
+    }
 
     LaunchedEffect(Unit) {
         BestCineAccountRepository.ensureLoaded()
+    }
+
+    DisposableEffect(Unit) {
+        onDispose {
+            BestCineAccountRepository.stopTvQrLogin()
+        }
     }
 
     Column(
@@ -797,7 +814,162 @@ private fun AuthForm(
             )
         }
 
-        Spacer(modifier = Modifier.height(18.dp))
+        Spacer(modifier = Modifier.height(14.dp))
+
+        if (!showQrLogin) {
+            AuthSecondaryButton(
+                text = "Conectar por QR Code (TV / Celular)",
+                enabled = !busy,
+                height = metrics.secondaryHeight,
+                scale = scale,
+                onClick = {
+                    BestCineAccountRepository.clearMessages()
+                    showQrLogin = true
+                    BestCineAccountRepository.startTvQrLogin(BestCineBranding.PRODUCTION_BASE_URL)
+                },
+            )
+        } else {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(18.dp))
+                    .background(AuthFieldBackground)
+                    .border(BorderStroke(1.dp, AuthFieldBorder), RoundedCornerShape(18.dp))
+                    .padding(16.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+                Text(
+                    text = "Conectar com QR Code",
+                    style = MaterialTheme.typography.titleMedium.copy(
+                        color = AuthTextPrimary,
+                        fontSize = (15f * scale).sp,
+                        fontWeight = FontWeight.SemiBold,
+                    ),
+                    textAlign = TextAlign.Center,
+                )
+                Text(
+                    text = "Aponte a câmera do celular para o QR Code ou acesse ${tvQrState.verifyBaseUrl.ifBlank { "example.invalid/tv" }} e clique em Autorizar TV.",
+                    style = MaterialTheme.typography.bodySmall.copy(
+                        color = AuthTextSecondary,
+                        fontSize = (12.5f * scale).sp,
+                        lineHeight = (17f * scale).sp,
+                    ),
+                    textAlign = TextAlign.Center,
+                )
+
+                when {
+                    tvQrState.isLoading -> {
+                        Box(
+                            modifier = Modifier.size(168.dp),
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            NuvioLoadingIndicator(size = 28.dp, color = BestCineBranding.PrimaryBlueBright)
+                        }
+                    }
+
+                    tvQrState.verifyUrl.isNotBlank() && !tvQrState.isExpired -> {
+                        BestCineQrCodeView(
+                            content = tvQrState.verifyUrl,
+                            size = 184.dp,
+                        )
+                        if (tvQrState.displayCode.isNotBlank()) {
+                            Text(
+                                text = tvQrState.displayCode,
+                                style = MaterialTheme.typography.headlineSmall.copy(
+                                    color = Color.White,
+                                    fontSize = (24f * scale).sp,
+                                    fontWeight = FontWeight.ExtraBold,
+                                    letterSpacing = 3.sp,
+                                ),
+                                textAlign = TextAlign.Center,
+                            )
+                        }
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        ) {
+                            NuvioLoadingIndicator(size = 14.dp, color = BestCineBranding.PrimaryBlueBright)
+                            Text(
+                                text = "Aguardando autorização no celular...",
+                                style = MaterialTheme.typography.bodySmall.copy(
+                                    color = BestCineBranding.PrimaryBlueBright,
+                                    fontSize = (12.5f * scale).sp,
+                                ),
+                            )
+                        }
+                    }
+
+                    else -> {
+                        tvQrState.errorMessage?.let { qrErr ->
+                            Text(
+                                text = qrErr,
+                                style = MaterialTheme.typography.bodySmall.copy(
+                                    color = MaterialTheme.colorScheme.error,
+                                    fontSize = (12.5f * scale).sp,
+                                    lineHeight = (17f * scale).sp,
+                                ),
+                                textAlign = TextAlign.Center,
+                            )
+                        }
+                    }
+                }
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                ) {
+                    Button(
+                        onClick = {
+                            BestCineAccountRepository.clearMessages()
+                            BestCineAccountRepository.startTvQrLogin(BestCineBranding.PRODUCTION_BASE_URL)
+                        },
+                        enabled = !busy && !tvQrState.isLoading,
+                        modifier = Modifier
+                            .weight(1f)
+                            .height(44.dp),
+                        shape = RoundedCornerShape(12.dp),
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = Color.White.copy(alpha = 0.14f),
+                            contentColor = Color.White,
+                        ),
+                    ) {
+                        Text(
+                            text = "Gerar novo código",
+                            style = MaterialTheme.typography.labelLarge.copy(
+                                fontSize = (13f * scale).sp,
+                                fontWeight = FontWeight.SemiBold,
+                            ),
+                        )
+                    }
+                    if (!isAndroidTv) {
+                        Button(
+                            onClick = {
+                                BestCineAccountRepository.stopTvQrLogin()
+                                showQrLogin = false
+                            },
+                            enabled = !busy,
+                            modifier = Modifier.height(44.dp),
+                            shape = RoundedCornerShape(12.dp),
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = Color.White.copy(alpha = 0.06f),
+                                contentColor = AuthTextSecondary,
+                            ),
+                        ) {
+                            Text(
+                                text = "Fechar",
+                                style = MaterialTheme.typography.labelLarge.copy(
+                                    fontSize = (13f * scale).sp,
+                                    fontWeight = FontWeight.Medium,
+                                ),
+                            )
+                        }
+                    }
+                }
+            }
+        }
+
+        Spacer(modifier = Modifier.height(14.dp))
 
         Text(
             text = "Acesso exclusivo com sua conta Google vinculada ao ${BestCineBranding.APP_NAME}.",

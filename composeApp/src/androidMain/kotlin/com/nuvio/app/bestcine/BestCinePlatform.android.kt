@@ -52,6 +52,23 @@ internal actual object BestCinePlatformStorage {
         fallbackMemorySession = null
         prefs()?.edit()?.remove(KEY_SESSION_JSON)?.apply()
     }
+
+    @Volatile
+    private var fallbackMemoryTvFavorites: Set<String> = emptySet()
+
+    actual fun loadTvFavoriteChannelIds(): Set<String> {
+        val raw = prefs()?.getString("tv_favorite_channel_ids", null) ?: return fallbackMemoryTvFavorites
+        return raw.lineSequence()
+            .map(String::trim)
+            .filter { it.isNotEmpty() }
+            .toSet()
+    }
+
+    actual fun saveTvFavoriteChannelIds(ids: Set<String>) {
+        val cleaned = ids.map(String::trim).filter { it.isNotEmpty() }.toSet()
+        fallbackMemoryTvFavorites = cleaned
+        prefs()?.edit()?.putString("tv_favorite_channel_ids", cleaned.joinToString("\n"))?.apply()
+    }
 }
 
 internal actual object BestCinePlatformAuth {

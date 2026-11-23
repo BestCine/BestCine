@@ -94,6 +94,8 @@ import com.nuvio.app.features.home.components.HomeSkeletonRow
 import com.nuvio.app.features.profiles.ProfileRepository
 import com.nuvio.app.features.tracking.TrackingRefreshIntent
 import com.nuvio.app.features.watched.WatchedRepository
+import com.nuvio.app.features.watchprogress.ContinueWatchingItem
+import com.nuvio.app.features.watchprogress.WatchProgressRepository
 import com.nuvio.app.features.watching.application.WatchingState
 import com.nuvio.app.core.poster.CustomPosterScreen
 import com.nuvio.app.core.poster.CustomPosterUrlRepository
@@ -117,6 +119,7 @@ fun LibraryScreen(
     onCatalogClick: ((HomeCatalogSection) -> Unit)? = null,
     onPreviewClick: ((MetaPreview) -> Unit)? = null,
     onPreviewLongClick: ((MetaPreview) -> Unit)? = null,
+    onContinueWatchingClick: ((ContinueWatchingItem) -> Unit)? = null,
     onDownloadsClick: (() -> Unit)? = null,
     disintegrationRequest: DisintegrationRequest<String>? = null,
 ) {
@@ -141,6 +144,22 @@ fun LibraryScreen(
         WatchedRepository.ensureLoaded()
         WatchedRepository.uiState
     }.collectAsStateWithLifecycle()
+    val watchProgressUiState by remember {
+        WatchProgressRepository.ensureLoaded()
+        WatchProgressRepository.uiState
+    }.collectAsStateWithLifecycle()
+    val continueWatchingRecords = remember(watchProgressUiState.entries) {
+        buildLibraryContinueWatchingRecords(watchProgressUiState.entries)
+    }
+    val historyRecords = remember(watchProgressUiState.entries, watchedUiState.items) {
+        buildLibraryHistoryRecords(
+            progressEntries = watchProgressUiState.entries,
+            watchedItems = watchedUiState.items,
+        )
+    }
+    val hasCloudAccounts = remember(cloudSettings) {
+        cloudSettings.cloudLibraryEnabled && cloudSettings.providerApiKeys.values.any { it.isNotBlank() }
+    }
     val fullyWatchedSeriesKeys by WatchedRepository.fullyWatchedSeriesKeys.collectAsStateWithLifecycle()
     val displaySettings by remember {
         LibraryDisplaySettingsRepository.ensureLoaded()
@@ -153,11 +172,11 @@ fun LibraryScreen(
         ServerRepository.uiState
     }.collectAsStateWithLifecycle()
     val hasServers = serversUiState.connections.any { it.enabled }
-    var sourceModeName by rememberSaveable { mutableStateOf(LibraryViewMode.Saved.name) }
-    val sourceMode = remember(sourceModeName, hasServers) {
-        runCatching { LibraryViewMode.valueOf(sourceModeName) }.getOrDefault(LibraryViewMode.Saved)
-            .takeUnless { it == LibraryViewMode.Servers && !hasServers }
-            ?: LibraryViewMode.Saved
+    var sourceModeName by rememberSaveable { mutableStateOf(LibraryViewMode.ContinueWatching.name) }
+    val sourceMode = remember(sourceModeName, hasServers, hasCloudAccounts) {
+        runCatching { LibraryViewMode.valueOf(sourceModeName) }.getOrDefault(LibraryViewMode.ContinueWatching)
+            .takeUnless { (it == LibraryViewMode.Servers && !hasServers) || (it == LibraryViewMode.Cloud && !hasCloudAccounts) }
+            ?: LibraryViewMode.ContinueWatching
     }
     var serverShelves by remember { mutableStateOf<List<LibraryServerShelf>?>(null) }
     var serverShelvesRequest by remember { mutableStateOf(0) }
@@ -403,6 +422,7 @@ fun LibraryScreen(
                         )
                         LibrarySourceSwitch(
                             selectedMode = sourceMode,
+                            showCloud = hasCloudAccounts,
                             showServers = hasServers,
                             onModeSelected = { mode ->
                                 sourceModeName = mode.name
@@ -414,7 +434,27 @@ fun LibraryScreen(
                 }
             }
 
-            if (sourceMode == LibraryViewMode.Cloud) {
+            if (sourceMode == LibraryViewMode.ContinueWatching || sourceMode == LibraryViewMode.History) {
+                val isHistoryTab = sourceMode == LibraryViewMode.History
+                libraryHistoryListContent(
+                    records = if (isHistoryTab) historyRecords else continueWatchingRecords,
+                    isHistoryTab = isHistoryTab,
+                    onOpenDetails = { preview -> onPreviewClick?.invoke(preview) },
+                    onContinueClick = onContinueWatchingClick,
+                    onRemoveRecord = { record ->
+                        if (record.progressEntry != null) {
+                            WatchProgressRepository.removeProgress(
+                                contentId = record.contentId,
+                                seasonNumber = record.seasonNumber,
+                                episodeNumber = record.episodeNumber,
+                            )
+                        }
+                        if (record.watchedItem != null) {
+                            WatchedRepository.unmarkWatched(record.watchedItem)
+                        }
+                    },
+                )
+            } else if (sourceMode == LibraryViewMode.Cloud) {
                 cloudLibraryContent(
                     uiState = cloudUiState,
                     selectedProviderId = selectedProviderId,
@@ -767,24 +807,39 @@ private fun LazyListScope.cloudLibrarySkeletonItems() {
 @Composable
 private fun LibrarySourceSwitch(
     selectedMode: LibraryViewMode,
+    showCloud: Boolean,
     showServers: Boolean,
     onModeSelected: (LibraryViewMode) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     Row(
-        modifier = modifier.fillMaxWidth(),
+        modifier = modifier
+            .fillMaxWidth()
+            .horizontalScroll(rememberScrollState()),
         horizontalArrangement = Arrangement.spacedBy(8.dp),
     ) {
         LibraryChip(
-            label = stringResource(Res.string.library_source_saved),
+            label = "Continuar assistindo",
+            selected = selectedMode == LibraryViewMode.ContinueWatching,
+            onClick = { onModeSelected(LibraryViewMode.ContinueWatching) },
+        )
+        LibraryChip(
+            label = "Favoritos",
             selected = selectedMode == LibraryViewMode.Saved,
             onClick = { onModeSelected(LibraryViewMode.Saved) },
         )
         LibraryChip(
-            label = stringResource(Res.string.library_source_cloud),
-            selected = selectedMode == LibraryViewMode.Cloud,
-            onClick = { onModeSelected(LibraryViewMode.Cloud) },
+            label = "Histórico",
+            selected = selectedMode == LibraryViewMode.History,
+            onClick = { onModeSelected(LibraryViewMode.History) },
         )
+        if (showCloud) {
+            LibraryChip(
+                label = stringResource(Res.string.library_source_cloud),
+                selected = selectedMode == LibraryViewMode.Cloud,
+                onClick = { onModeSelected(LibraryViewMode.Cloud) },
+            )
+        }
         if (showServers) {
             LibraryChip(
                 label = stringResource(Res.string.library_source_servers),
@@ -1253,7 +1308,9 @@ private fun CloudLibrarySkeletonRow(
 }
 
 private enum class LibraryViewMode {
+    ContinueWatching,
     Saved,
+    History,
     Cloud,
     Servers,
 }

@@ -1,6 +1,7 @@
 package com.nuvio.app.features.profiles
 
 import co.touchlab.kermit.Logger
+import com.nuvio.app.bestcine.BestCineAccountRepository
 import com.nuvio.app.core.auth.AuthRepository
 import com.nuvio.app.core.auth.AuthState
 import com.nuvio.app.core.auth.isAnonymous
@@ -104,9 +105,8 @@ object ProfileRepository {
 
         val stored = decodeStoredPayload()
         loadedCacheForUserId = userId
-        if (stored == null) {
-            _state.value = ProfileState()
-            activeProfileIndex = 1
+        if (stored == null || stored.profiles.isEmpty()) {
+            ensureDefaultLocalProfile(userId)
             return
         }
 
@@ -121,6 +121,29 @@ object ProfileRepository {
         applyStoredPayload(stored)
     }
 
+    private fun ensureDefaultLocalProfile(userId: String) {
+        val bcUser = BestCineAccountRepository.state.value.session?.user
+        val defaultName = bcUser?.nome?.trim()?.takeIf { it.isNotBlank() }?.take(24) ?: "Principal"
+        val defaultAvatarUrl = bcUser?.avatar?.trim()?.takeIf { it.isNotBlank() }
+        val defaultProfile = NuvioProfile(
+            id = "local_profile_1",
+            userId = userId,
+            profileIndex = 1,
+            name = defaultName,
+            avatarColorHex = "#1E6BFF",
+            avatarUrl = defaultAvatarUrl,
+        )
+        activeProfileIndex = 1
+        _state.value = ProfileState(
+            profiles = listOf(defaultProfile),
+            activeProfile = defaultProfile,
+            isLoaded = true,
+            hasEverSelectedProfile = false,
+            rememberLastProfileEnabled = false,
+        )
+        persist()
+    }
+
     fun clearInMemory() {
         loadedCacheForUserId = null
         activeProfileIndex = 1
@@ -129,7 +152,10 @@ object ProfileRepository {
 
     suspend fun pullProfiles() {
         if (AuthRepository.state.value.isAnonymous) {
-            if (!_state.value.isLoaded) {
+            if (_state.value.profiles.isEmpty()) {
+                val uid = (AuthRepository.state.value as? AuthState.Authenticated)?.userId ?: "local"
+                ensureDefaultLocalProfile(uid)
+            } else if (!_state.value.isLoaded) {
                 _state.value = _state.value.copy(isLoaded = true)
             }
             return

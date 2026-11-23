@@ -1,5 +1,6 @@
 package com.nuvio.app
 
+import androidx.compose.runtime.Composable
 import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.input.pointer.PointerButton
 import androidx.compose.ui.input.pointer.PointerEvent
@@ -14,6 +15,9 @@ internal actual val isIos: Boolean = false
 internal actual val isDesktop: Boolean = true
 internal actual val isWindows: Boolean = System.getProperty("os.name").orEmpty().lowercase().contains("win")
 internal actual val supportsPosterNavigationMotion: Boolean = false
+
+@Composable
+internal actual fun rememberIsAndroidTv(): Boolean = false
 
 @OptIn(ExperimentalComposeUiApi::class)
 internal actual fun PointerEvent.isMouseBackButtonPress(): Boolean = button == PointerButton.Back

@@ -5,9 +5,12 @@ import platform.Foundation.timeIntervalSince1970
 
 internal actual object BestCinePlatformStorage {
     private var memorySession: String? = null
+    private var memoryTvFavorites: Set<String> = emptySet()
     actual fun loadSessionJson(): String? = memorySession
     actual fun saveSessionJson(payload: String) { memorySession = payload }
     actual fun clearSession() { memorySession = null }
+    actual fun loadTvFavoriteChannelIds(): Set<String> = memoryTvFavorites
+    actual fun saveTvFavoriteChannelIds(ids: Set<String>) { memoryTvFavorites = ids }
 }
 
 internal actual object BestCinePlatformAuth {

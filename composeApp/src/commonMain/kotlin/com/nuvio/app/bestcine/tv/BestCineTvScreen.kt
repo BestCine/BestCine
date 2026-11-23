@@ -55,6 +55,8 @@ import androidx.compose.material.icons.rounded.Refresh
 import androidx.compose.material.icons.rounded.Search
 import androidx.compose.material.icons.rounded.SkipNext
 import androidx.compose.material.icons.rounded.SkipPrevious
+import androidx.compose.material.icons.rounded.Star
+import androidx.compose.material.icons.rounded.StarBorder
 import androidx.compose.material.icons.rounded.VolumeOff
 import androidx.compose.material.icons.rounded.VolumeUp
 import androidx.compose.material3.Button
@@ -220,6 +222,13 @@ internal fun BestCineTvScreen(
                     } else {
                         null
                     }
+                } else if (category.name == BESTCINE_TV_FAVORITES_CATEGORY) {
+                    val favMatches = matchingChannels.count { it.id in uiState.favoriteChannelIds }
+                    when {
+                        category.name.contains(q, ignoreCase = true) -> category
+                        favMatches > 0 -> category.copy(count = favMatches)
+                        else -> null
+                    }
                 } else {
                     val groupNameMatches = category.name.contains(q, ignoreCase = true)
                     val channelMatchCount = matchingCountsByGroup[category.name.lowercase()] ?: 0
@@ -236,11 +245,13 @@ internal fun BestCineTvScreen(
     val filteredChannels = remember(
         uiState.channels,
         uiState.selectedCategory,
+        uiState.favoriteChannelIds,
         uiState.categorySearchQuery,
         uiState.searchQuery,
     ) {
         val leftQuery = uiState.categorySearchQuery.trim()
         val rightQuery = uiState.searchQuery.trim()
+        val isFavoritesCategory = uiState.selectedCategory == BESTCINE_TV_FAVORITES_CATEGORY
 
         // Se o usuário digitou o nome de um canal na busca da esquerda e o grupo atual não tem esse canal,
         // exibe automaticamente os canais encontrados em qualquer grupo!
@@ -250,6 +261,14 @@ internal fun BestCineTvScreen(
 
         val hasMatchInSelectedCategory = if (leftQuery.isEmpty() || uiState.selectedCategory == BESTCINE_TV_ALL_CATEGORY) {
             true
+        } else if (isFavoritesCategory) {
+            uiState.channels.any { ch ->
+                ch.id in uiState.favoriteChannelIds && (
+                    ch.name.contains(leftQuery, ignoreCase = true) ||
+                        ch.group.contains(leftQuery, ignoreCase = true) ||
+                        ch.epgSummary.contains(leftQuery, ignoreCase = true)
+                    )
+            }
         } else {
             uiState.channels.any { ch ->
                 ch.group.equals(uiState.selectedCategory, ignoreCase = true) && (
@@ -263,7 +282,7 @@ internal fun BestCineTvScreen(
         uiState.channels.filter { channel ->
             val matchesCategory = uiState.selectedCategory == BESTCINE_TV_ALL_CATEGORY ||
                 (!hasMatchInSelectedCategory && leftQuery.isNotEmpty()) ||
-                channel.group.equals(uiState.selectedCategory, ignoreCase = true)
+                (if (isFavoritesCategory) channel.id in uiState.favoriteChannelIds else channel.group.equals(uiState.selectedCategory, ignoreCase = true))
 
             val matchesLeftQuery = leftQuery.isEmpty() ||
                 selectedGroupMatchesLeftQuery ||
@@ -620,6 +639,7 @@ internal fun BestCineTvScreen(
                         isFullscreen = isFullscreen,
                         isCompactMobile = isCompactMobile,
                         channels = filteredChannels.ifEmpty { uiState.channels },
+                        favoriteChannelIds = uiState.favoriteChannelIds,
                         activeChannel = uiState.activeChannel!!,
                         activeStreams = uiState.activeStreams,
                         activeStreamIndex = uiState.activeStreamIndex,
@@ -627,6 +647,7 @@ internal fun BestCineTvScreen(
                         isLoadingEpg = uiState.isLoadingEpg,
                         openingChannelId = uiState.openingChannelId,
                         onSelectChannel = ::selectChannel,
+                        onToggleFavoriteChannel = BestCineTvRepository::toggleFavoriteChannel,
                         onSelectSourceIndex = BestCineTvRepository::selectActiveStreamIndex,
                         onPreviousChannel = { zapRelative(-1) },
                         onNextChannel = { zapRelative(+1) },
@@ -643,9 +664,14 @@ internal fun BestCineTvScreen(
                 filteredChannels.isEmpty() -> {
                     Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                         Text(
-                            text = "Nenhum canal encontrado para esse filtro.",
+                            text = if (uiState.selectedCategory == BESTCINE_TV_FAVORITES_CATEGORY) {
+                                "Nenhum canal favorito ainda. Toque na estrela ☆ em qualquer canal para adicioná-lo aqui."
+                            } else {
+                                "Nenhum canal encontrado para esse filtro."
+                            },
                             style = MaterialTheme.typography.bodyLarge,
                             color = tokens.colors.textMuted,
+                            modifier = Modifier.padding(horizontal = 24.dp),
                         )
                     }
                 }
@@ -664,8 +690,10 @@ internal fun BestCineTvScreen(
                         items(filteredChannels, key = { it.id }) { channel ->
                             BestCineTvGridCard(
                                 channel = channel,
+                                isFavorite = channel.id in uiState.favoriteChannelIds,
                                 isOpening = uiState.openingChannelId == channel.id,
                                 enabled = uiState.openingChannelId == null,
+                                onToggleFavorite = { BestCineTvRepository.toggleFavoriteChannel(channel.id) },
                                 onClick = { selectChannel(channel) },
                             )
                         }
@@ -748,6 +776,7 @@ private fun BestCineTvSplitPlayerLayout(
     isSelectedTab: Boolean,
     isFullscreen: Boolean,
     channels: List<BestCineTvChannel>,
+    favoriteChannelIds: Set<String>,
     activeChannel: BestCineTvChannel,
     activeStreams: List<StreamItem>,
     activeStreamIndex: Int,
@@ -755,6 +784,7 @@ private fun BestCineTvSplitPlayerLayout(
     isLoadingEpg: Boolean,
     openingChannelId: String?,
     onSelectChannel: (BestCineTvChannel) -> Unit,
+    onToggleFavoriteChannel: (String) -> Unit,
     onSelectSourceIndex: (Int) -> Unit,
     onPreviousChannel: () -> Unit,
     onNextChannel: () -> Unit,
@@ -971,6 +1001,19 @@ private fun BestCineTvSplitPlayerLayout(
                                         overflow = TextOverflow.Ellipsis,
                                     )
                                 }
+                            }
+
+                            val isFavorite = channel.id in favoriteChannelIds
+                            IconButton(
+                                onClick = { onToggleFavoriteChannel(channel.id) },
+                                modifier = Modifier.size(28.dp),
+                            ) {
+                                Icon(
+                                    imageVector = if (isFavorite) Icons.Rounded.Star else Icons.Rounded.StarBorder,
+                                    contentDescription = if (isFavorite) "Remover favorito" else "Favoritar canal",
+                                    tint = if (isFavorite) Color(0xFFFFCA28) else Color.White.copy(alpha = 0.35f),
+                                    modifier = Modifier.size(16.dp),
+                                )
                             }
 
                             if (isOpening) {
@@ -1302,6 +1345,18 @@ private fun BestCineTvSplitPlayerLayout(
                                             verticalAlignment = Alignment.CenterVertically,
                                             horizontalArrangement = Arrangement.spacedBy(4.dp),
                                         ) {
+                                            val activeIsFavorite = activeChannel.id in favoriteChannelIds
+                                            IconButton(
+                                                onClick = { onToggleFavoriteChannel(activeChannel.id) },
+                                                modifier = Modifier.size(34.dp),
+                                            ) {
+                                                Icon(
+                                                    imageVector = if (activeIsFavorite) Icons.Rounded.Star else Icons.Rounded.StarBorder,
+                                                    contentDescription = if (activeIsFavorite) "Remover favorito" else "Favoritar canal",
+                                                    tint = if (activeIsFavorite) Color(0xFFFFCA28) else tokens.colors.textPrimary,
+                                                    modifier = Modifier.size(19.dp),
+                                                )
+                                            }
                                             IconButton(
                                                 onClick = { togglePlayerPictureInPicture() },
                                                 modifier = Modifier.size(34.dp),
@@ -1423,6 +1478,17 @@ private fun BestCineTvSplitPlayerLayout(
                                                     color = BestCineBranding.PrimaryBlueBright,
                                                 )
                                             }
+                                        }
+
+                                        val activeIsFavoriteDesktop = activeChannel.id in favoriteChannelIds
+                                        IconButton(
+                                            onClick = { onToggleFavoriteChannel(activeChannel.id) },
+                                        ) {
+                                            Icon(
+                                                imageVector = if (activeIsFavoriteDesktop) Icons.Rounded.Star else Icons.Rounded.StarBorder,
+                                                contentDescription = if (activeIsFavoriteDesktop) "Remover favorito" else "Favoritar canal",
+                                                tint = if (activeIsFavoriteDesktop) Color(0xFFFFCA28) else tokens.colors.textPrimary,
+                                            )
                                         }
 
                                         IconButton(
@@ -1662,8 +1728,10 @@ private fun BestCineTvEpgPanel(
 @Composable
 private fun BestCineTvGridCard(
     channel: BestCineTvChannel,
+    isFavorite: Boolean,
     isOpening: Boolean,
     enabled: Boolean,
+    onToggleFavorite: () -> Unit,
     onClick: () -> Unit,
 ) {
     val tokens = MaterialTheme.nuvio
@@ -1707,6 +1775,24 @@ private fun BestCineTvGridCard(
                         contentDescription = null,
                         tint = BestCineBranding.PrimaryBlueBright.copy(alpha = 0.7f),
                         modifier = Modifier.size(34.dp),
+                    )
+                }
+
+                Box(
+                    modifier = Modifier
+                        .align(Alignment.TopEnd)
+                        .padding(6.dp)
+                        .size(28.dp)
+                        .clip(CircleShape)
+                        .background(Color.Black.copy(alpha = 0.55f))
+                        .clickable(onClick = onToggleFavorite),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Icon(
+                        imageVector = if (isFavorite) Icons.Rounded.Star else Icons.Rounded.StarBorder,
+                        contentDescription = if (isFavorite) "Remover favorito" else "Favoritar canal",
+                        tint = if (isFavorite) Color(0xFFFFCA28) else Color.White.copy(alpha = 0.72f),
+                        modifier = Modifier.size(16.dp),
                     )
                 }
 

@@ -3,6 +3,7 @@ package com.nuvio.app.bestcine.tv
 import co.touchlab.kermit.Logger
 import com.nuvio.app.bestcine.BestCineAccountRepository
 import com.nuvio.app.bestcine.BestCineBranding
+import com.nuvio.app.bestcine.BestCinePlatformStorage
 import com.nuvio.app.bestcine.bestCineCurrentTimeMillis
 import com.nuvio.app.features.addons.AddonRepository
 import com.nuvio.app.features.addons.fetchAddonResponseText
@@ -30,6 +31,53 @@ object BestCineTvRepository {
     private const val EPG_CACHE_TTL_MS = 5 * 60_000L
     private data class CachedEpg(val details: BestCineTvEpgDetails, val fetchedAtMs: Long)
     private val epgCache = mutableMapOf<String, CachedEpg>()
+    private var favoritesLoaded = false
+
+    private fun ensureFavoritesLoaded(): Set<String> {
+        if (!favoritesLoaded) {
+            favoritesLoaded = true
+            val loaded = runCatching { BestCinePlatformStorage.loadTvFavoriteChannelIds() }.getOrDefault(emptySet())
+            _uiState.update { state ->
+                state.copy(
+                    favoriteChannelIds = loaded,
+                    categories = buildCategories(state.channels, loaded),
+                )
+            }
+            return loaded
+        }
+        return _uiState.value.favoriteChannelIds
+    }
+
+    private fun buildCategories(
+        channels: List<BestCineTvChannel>,
+        favoriteIds: Set<String>,
+    ): List<BestCineTvCategoryItem> {
+        val countsByGroup = channels.groupingBy { it.group }.eachCount()
+        val favCount = channels.count { it.id in favoriteIds }
+        return buildList {
+            add(BestCineTvCategoryItem(BESTCINE_TV_ALL_CATEGORY, channels.size))
+            add(BestCineTvCategoryItem(BESTCINE_TV_FAVORITES_CATEGORY, favCount))
+            addAll(
+                countsByGroup.entries
+                    .sortedBy { it.key.lowercase() }
+                    .map { (groupName, count) -> BestCineTvCategoryItem(groupName, count) },
+            )
+        }
+    }
+
+    fun toggleFavoriteChannel(channelId: String) {
+        val cleanId = channelId.trim()
+        if (cleanId.isEmpty()) return
+        val currentFavs = ensureFavoritesLoaded()
+        val nextFavs = if (cleanId in currentFavs) currentFavs - cleanId else currentFavs + cleanId
+        runCatching { BestCinePlatformStorage.saveTvFavoriteChannelIds(nextFavs) }
+        _uiState.update { state ->
+            state.copy(
+                favoriteChannelIds = nextFavs,
+                categories = buildCategories(state.channels, nextFavs),
+            )
+        }
+    }
 
     fun setSelectedCategory(category: String) {
         _uiState.update { it.copy(selectedCategory = category) }
@@ -197,15 +245,8 @@ object BestCineTvRepository {
                         )
                     }
 
-                val countsByGroup = channels.groupingBy { it.group }.eachCount()
-                val categories = buildList {
-                    add(BestCineTvCategoryItem(BESTCINE_TV_ALL_CATEGORY, channels.size))
-                    addAll(
-                        countsByGroup.entries
-                            .sortedBy { it.key.lowercase() }
-                            .map { (groupName, count) -> BestCineTvCategoryItem(groupName, count) }
-                    )
-                }
+                val favoriteIds = ensureFavoritesLoaded()
+                val categories = buildCategories(channels, favoriteIds)
 
                 if (forceRefresh) {
                     BestCineTvZappingGuard.clearCache()
@@ -222,6 +263,7 @@ object BestCineTvRepository {
                         hasLoadedOnce = true,
                         channels = channels,
                         categories = categories,
+                        favoriteChannelIds = favoriteIds,
                         selectedCategory = validSelectedCategory,
                         catalogError = if (channels.isEmpty()) {
                             "Nenhum canal de TV ativo para sua conta. Verifique se a TV ao vivo está ativada no painel do BestCine."

@@ -4,6 +4,8 @@ internal expect object BestCinePlatformStorage {
     fun loadSessionJson(): String?
     fun saveSessionJson(payload: String)
     fun clearSession()
+    fun loadTvFavoriteChannelIds(): Set<String>
+    fun saveTvFavoriteChannelIds(ids: Set<String>)
 }
 
 internal expect object BestCinePlatformAuth {

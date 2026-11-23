@@ -1910,4 +1910,6 @@
     <string name="settings_mdblist_library_lists_description">Escolhe que listas do MDBList aparecem na Biblioteca e em Gerir Listas. A Watchlist aparece sempre.</string>
     <string name="settings_mdblist_library_lists_summary">%1$d de %2$d visíveis</string>
     <string name="settings_mdblist_library_lists_empty">Ainda não foram encontradas listas na tua conta MDBList. Sincroniza para as carregar.</string>
+    <string name="settings_advanced_discord_rich_presence">Discord Rich Presence</string>
+    <string name="settings_advanced_discord_rich_presence_description">Mostra no teu perfil do Discord o que estás a navegar ou a assistir. Ativado por padrão.</string>
 </resources>

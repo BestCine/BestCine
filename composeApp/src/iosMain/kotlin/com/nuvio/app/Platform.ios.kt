@@ -1,5 +1,6 @@
 package com.nuvio.app
 
+import androidx.compose.runtime.Composable
 import platform.UIKit.UIDevice
 
 class IOSPlatform: Platform {
@@ -13,3 +14,6 @@ internal actual val isDesktop: Boolean = false
 internal actual val isWindows: Boolean = false
 
 internal actual val supportsPosterNavigationMotion: Boolean = false
+
+@Composable
+internal actual fun rememberIsAndroidTv(): Boolean = false

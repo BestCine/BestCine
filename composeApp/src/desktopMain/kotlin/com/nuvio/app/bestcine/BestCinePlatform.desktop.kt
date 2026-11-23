@@ -35,6 +35,19 @@ internal actual object BestCinePlatformStorage {
     actual fun clearSession() {
         store.remove(KEY_SESSION_JSON)
     }
+
+    actual fun loadTvFavoriteChannelIds(): Set<String> {
+        val raw = store.getString("tv_favorite_channel_ids").orEmpty()
+        return raw.lineSequence()
+            .map(String::trim)
+            .filter { it.isNotEmpty() }
+            .toSet()
+    }
+
+    actual fun saveTvFavoriteChannelIds(ids: Set<String>) {
+        val cleaned = ids.map(String::trim).filter { it.isNotEmpty() }.toSet()
+        store.putString("tv_favorite_channel_ids", cleaned.joinToString("\n"))
+    }
 }
 
 internal actual object BestCinePlatformAuth {

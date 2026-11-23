@@ -93,7 +93,8 @@ internal fun MainTabsDestination(
 
     BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
         val screenWidth = maxWidth
-        val isTabletLayout = useTabletFloatingTabBar || screenWidth >= 768.dp
+        val isAndroidTv = rememberIsAndroidTv()
+        val isTabletLayout = isAndroidTv || useTabletFloatingTabBar || screenWidth >= 768.dp
         val tabActions = remember(actions, isTabletLayout) { actions(isTabletLayout) }
         val useNativeBottomTabs = if (useNativeNavigation) {
             useNativeTabBar
@@ -251,7 +252,13 @@ internal fun MainTabsDestination(
                 }
             },
         ) { innerPadding ->
-            Box(modifier = Modifier.fillMaxSize()) {
+            val tvOverscanHorizontal = if (isAndroidTv && !isBestCineTvFullscreen) 28.dp else 0.dp
+            val tvOverscanVertical = if (isAndroidTv && !isBestCineTvFullscreen) 14.dp else 0.dp
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(horizontal = tvOverscanHorizontal, vertical = tvOverscanVertical),
+            ) {
                 val requiresNavBarHaze = if (useDesktopTopBar) {
                     true
                 } else if (isTabletLayout) {
@@ -315,22 +322,6 @@ internal fun MainTabsDestination(
                         hazeState = navBarHazeState,
                         scrollState = navBarScrollState,
                         windowWidth = screenWidth,
-                    )
-                }
-
-                if (isTabletLayout && !useNativeBottomTabs && !isDesktop && !isBestCineTvFullscreen) {
-                    val tabletNavBarScrollState = remember { NuvioNavBarScrollState().apply { collapse() } }
-                    FloatingNavigationBar(
-                        modifier = Modifier.align(Alignment.TopCenter).widthIn(max = 416.dp),
-                        scrollState = tabletNavBarScrollState,
-                        hazeState = navBarHazeState,
-                        contentPadding = PaddingValues(
-                            top = WindowInsets.statusBars.asPaddingValues().calculateTopPadding() + 10.dp,
-                            bottom = 8.dp,
-                        ),
-                        compactSize = true,
-                        items = floatingNavigationItems,
-                        glowEnabled = navBarGlowEnabled,
                     )
                 }
 

@@ -111,59 +111,10 @@ object AddonRepository {
 
     suspend fun pullFromServer(profileId: Int) {
         currentProfileId = resolveEffectiveProfileId(profileId)
-        log.i { "pullFromServer() — profileId=$profileId, initialized=$initialized" }
-        runCatching {
-            val rows = SupabaseProvider.client.postgrest
-                .from("addons")
-                .select {
-                    filter { eq("profile_id", currentProfileId) }
-                    order("sort_order", Order.ASCENDING)
-                }
-                .decodeList<AddonRow>()
-
-            val rowsByUrl = linkedMapOf<String, AddonRow>()
-            rows.forEach { row ->
-                val manifestUrl = ensureManifestSuffix(row.url)
-                if (!rowsByUrl.containsKey(manifestUrl)) {
-                    rowsByUrl[manifestUrl] = row.copy(url = manifestUrl)
-                }
-            }
-
-            val urls = rowsByUrl.keys.toList()
-            log.i { "pullFromServer() — server returned ${rows.size} addons" }
-            urls.forEachIndexed { i, u -> log.d { "  server[$i]: $u" } }
-
-            val existingByUrl = _uiState.value.addons.associateBy(ManagedAddon::manifestUrl)
-            val existingBestCineAddon = _uiState.value.addons.firstOrNull { addon ->
-                addon.manifest != null || addon.manifestUrl.contains("bestcine", ignoreCase = true)
-            }
-            val pulledAddons = urls.map { url ->
-                val row = rowsByUrl[url]
-                existingByUrl[url].toPendingAddon(
-                    manifestUrl = url,
-                    userSetName = row?.name?.takeIf { it.isNotBlank() },
-                    enabled = row?.enabled,
-                )
-            }.toMutableList()
-
-            if (existingBestCineAddon != null && pulledAddons.none { it.manifestUrl == existingBestCineAddon.manifestUrl }) {
-                pulledAddons.add(0, existingBestCineAddon)
-            }
-
-            _uiState.value = AddonsUiState(addons = pulledAddons)
-            persist()
-            urls.forEach { url ->
-                val existing = existingByUrl[url]
-                val addon = _uiState.value.addons.firstOrNull { it.manifestUrl == url }
-                if (addon?.enabled == true && (existing == null || (addon.manifest == null && !addon.isRefreshing))) {
-                    refreshAddon(url)
-                }
-            }
-            initialized = true
-            log.i { "pullFromServer() — applied ${urls.size} addons to state" }
-        }.onFailure { e ->
-            log.e(e) { "pullFromServer() — FAILED" }
-        }
+        // BestCine: addons são gerenciados exclusivamente pelo app/conta BestCine.
+        // Nunca baixar ou sobrescrever addons de servidores externos de sync.
+        log.i { "pullFromServer() — ignorado no BestCine (addons locais preservados, profileId=$profileId)" }
+        initialize()
     }
 
     suspend fun awaitManifestsLoaded() {
@@ -319,42 +270,8 @@ object AddonRepository {
     }
 
     private fun pushToServer() {
-        if (isUsingPrimaryAddonsFromSecondaryProfile()) return
-        val profileId = currentProfileId
-        val addons = _uiState.value.addons
-            .distinctBy { it.manifestUrl }
-            .mapIndexed { index, addon ->
-                AddonPushItem(
-                    url = addon.manifestUrl,
-                    name = addon.userSetName?.takeIf { it.isNotBlank() } ?: addon.manifest?.name ?: "",
-                    enabled = addon.enabled,
-                    sortOrder = index,
-                )
-            }
-        pushJobsByProfile[profileId]?.cancel()
-        var pushJob: Job? = null
-        pushJob = scope.launch {
-            try {
-                delay(ADDON_PUSH_DEBOUNCE_MS)
-                log.d { "pushToServer() — profileId=$profileId, pushing ${addons.size} addons" }
-                val params = buildJsonObject {
-                    put("p_profile_id", profileId)
-                    put("p_addons", json.encodeToJsonElement(addons))
-                    putSyncOriginClientId()
-                }
-                SupabaseProvider.client.postgrest.rpc("sync_push_addons", params)
-                log.d { "pushToServer() — success" }
-            } catch (error: CancellationException) {
-                throw error
-            } catch (error: Throwable) {
-                log.e(error) { "pushToServer() — FAILED" }
-            } finally {
-                if (pushJobsByProfile[profileId] === pushJob) {
-                    pushJobsByProfile.remove(profileId)
-                }
-            }
-        }
-        pushJobsByProfile[profileId] = pushJob
+        // BestCine: nunca enviar a lista de addons (incluindo o token do BestCine) para servidores externos de sync.
+        return
     }
 
     private fun markRefreshing(manifestUrl: String) {

@@ -98,3 +98,34 @@ sealed interface BestCineAuthResult {
     data object Cancelled : BestCineAuthResult
     data class Error(val message: String) : BestCineAuthResult
 }
+
+@Serializable
+data class BestCineTvCodeResponse(
+    val ok: Boolean = false,
+    @SerialName("device_code") val deviceCode: String = "",
+    @SerialName("user_code") val userCode: String = "",
+    @SerialName("display_code") val displayCode: String = "",
+    @SerialName("verify_base_url") val verifyBaseUrl: String = "",
+    @SerialName("verify_url") val verifyUrl: String = "",
+    @SerialName("expires_in") val expiresIn: Int = 300,
+    val interval: Int = 3,
+    val error: String? = null,
+)
+
+@Serializable
+data class BestCineTvPollResponse(
+    val status: String = "",
+    val logado: Boolean = false,
+    val usuario: BestCineUser? = null,
+    val error: String? = null,
+)
+
+data class BestCineTvQrUiState(
+    val isLoading: Boolean = false,
+    val isPolling: Boolean = false,
+    val isExpired: Boolean = false,
+    val displayCode: String = "",
+    val verifyBaseUrl: String = "",
+    val verifyUrl: String = "",
+    val errorMessage: String? = null,
+)

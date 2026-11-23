@@ -69,6 +69,7 @@ data class BestCineTvUiState(
     val channels: List<BestCineTvChannel> = emptyList(),
     val categories: List<BestCineTvCategoryItem> = listOf(BestCineTvCategoryItem(BESTCINE_TV_ALL_CATEGORY, 0)),
     val selectedCategory: String = BESTCINE_TV_ALL_CATEGORY,
+    val favoriteChannelIds: Set<String> = emptySet(),
     val categorySearchQuery: String = "",
     val searchQuery: String = "",
     val openingChannelId: String? = null,
@@ -87,3 +88,4 @@ data class BestCineTvUiState(
 }
 
 const val BESTCINE_TV_ALL_CATEGORY = "Todos"
+const val BESTCINE_TV_FAVORITES_CATEGORY = "★ Favoritos"

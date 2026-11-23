@@ -312,6 +312,7 @@ internal fun AppTabHost(
                     onCatalogClick = actions.onCatalogClick,
                     onPreviewClick = actions.onPosterClick,
                     onPreviewLongClick = actions.onPosterLongClick,
+                    onContinueWatchingClick = actions.onContinueWatchingClick,
                     onDownloadsClick = actions.onDownloadsClick,
                     disintegrationRequest = state.libraryDisintegrationRequest,
                 )
