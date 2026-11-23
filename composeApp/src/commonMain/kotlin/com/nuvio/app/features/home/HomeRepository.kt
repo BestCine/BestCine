@@ -13,10 +13,14 @@ import com.nuvio.app.core.poster.withCustomPosterUrls
 import com.nuvio.app.features.collection.Collection
 import com.nuvio.app.features.collection.CollectionRepository
 import com.nuvio.app.features.collection.CollectionSource
+import com.nuvio.app.features.collection.TmdbCollectionMediaType
+import com.nuvio.app.features.collection.TmdbCollectionSort
 import com.nuvio.app.features.collection.TmdbCollectionSourceResolver
+import com.nuvio.app.features.collection.TmdbCollectionSourceType
 import com.nuvio.app.features.collection.catalogRouteKey
 import com.nuvio.app.features.collection.findCollectionCatalog
 import com.nuvio.app.features.servers.ServerCatalog
+import com.nuvio.app.features.tmdb.TmdbSettingsRepository
 import com.nuvio.app.features.trakt.TraktPublicListSourceResolver
 import com.nuvio.app.features.watchprogress.CurrentDateProvider
 import com.nuvio.app.isDesktop
@@ -276,7 +280,7 @@ object HomeRepository {
         serverConnectionId?.let { connectionId -> return toServerSection(connectionId) }
         CustomPosterUrlRepository.ensureLoaded()
         val pattern = CustomPosterUrlRepository.patternForScreen(com.nuvio.app.core.poster.CustomPosterScreen.HOME)
-        val page = if (isDesktop) {
+        val page = fetchLocalizedBuiltinPopularOrNull() ?: if (isDesktop) {
             fetchDesktopHomePreview(forceRefresh)
         } else {
             fetchCatalogPage(
@@ -321,6 +325,39 @@ object HomeRepository {
             availableItemCount = page.rawItemCount,
             hasMore = supportsPagination && page.nextSkip != null,
         )
+    }
+
+    private suspend fun HomeCatalogDefinition.fetchLocalizedBuiltinPopularOrNull(): CatalogPage? {
+        if (manifestUrl != BUILTIN_CINEMETA_MANIFEST_URL) return null
+        val tmdbSettings = TmdbSettingsRepository.snapshot()
+        if (!tmdbSettings.enabled || TmdbSettingsRepository.effectiveApiKey().isBlank()) return null
+        val mediaType = if (type.equals("series", ignoreCase = true)) {
+            TmdbCollectionMediaType.TV
+        } else {
+            TmdbCollectionMediaType.MOVIE
+        }
+        val source = CollectionSource(
+            provider = "tmdb",
+            tmdbSourceType = TmdbCollectionSourceType.DISCOVER.name,
+            mediaType = mediaType.value,
+            sortBy = TmdbCollectionSort.POPULAR_DESC.value,
+        )
+        return runCatching {
+            val maxPages = if (isDesktop) 2 else 1
+            var merged = emptyList<MetaPreview>()
+            var lastNext: Int? = null
+            for (pageNum in 1..maxPages) {
+                val p = TmdbCollectionSourceResolver.resolve(source = source, page = pageNum)
+                merged = mergeCatalogItems(merged, p.items)
+                lastNext = p.nextSkip
+                if (p.nextSkip == null) break
+            }
+            if (merged.isEmpty()) null else CatalogPage(
+                items = merged,
+                rawItemCount = merged.size,
+                nextSkip = lastNext,
+            )
+        }.getOrNull()
     }
 
     private suspend fun HomeCatalogDefinition.fetchDesktopHomePreview(forceRefresh: Boolean): CatalogPage {

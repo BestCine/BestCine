@@ -57,7 +57,7 @@ object BestCineAccountRepository {
     private var banWatchdogJob: Job? = null
     private var tvQrPollJob: Job? = null
     private val syncManifestMutex = Mutex()
-    private const val BAN_WATCHDOG_INTERVAL_MS = 12_000L
+    private const val BAN_WATCHDOG_INTERVAL_MS = 60_000L
 
     fun ensureLoaded() {
         if (loaded) {

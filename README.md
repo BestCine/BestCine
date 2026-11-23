@@ -11,12 +11,12 @@
 
 <p align="center">
   <a href="https://github.com/BestCine/BestCine/releases/latest">
-    <img src="https://img.shields.io/badge/Vers%C3%A3o_Atual-v1.1.3-1E6BFF?style=for-the-badge" alt="Versão Atual" />
+    <img src="https://img.shields.io/badge/Vers%C3%A3o_Atual-v1.1.4-1E6BFF?style=for-the-badge" alt="Versão Atual" />
   </a>
-  <a href="https://github.com/BestCine/BestCine/releases/download/v1.1.3/BestCine-Windows-x64-1.1.3.msi">
+  <a href="https://github.com/BestCine/BestCine/releases/download/v1.1.4/BestCine-Windows-x64-1.1.4.msi">
     <img src="https://img.shields.io/badge/Windows-x64_(.msi)-0078D6?style=for-the-badge&logo=windows&logoColor=white" alt="Windows Download" />
   </a>
-  <a href="https://github.com/BestCine/BestCine/releases/download/v1.1.3/BestCine-Android-arm64-v8a-1.1.3.apk">
+  <a href="https://github.com/BestCine/BestCine/releases/download/v1.1.4/BestCine-Android-arm64-v8a-1.1.4.apk">
     <img src="https://img.shields.io/badge/Android-Celular_(.apk)-3DDC84?style=for-the-badge&logo=android&logoColor=white" alt="Android Download" />
   </a>
   <a href="https://github.com/BestCine/BestCine-TV">
@@ -32,14 +32,14 @@
 
 ---
 
-## 📥 Download Oficial (v1.1.3)
+## 📥 Download Oficial (v1.1.4)
 
 | Plataforma | Arquivo | Link Direto |
 | :--- | :--- | :--- |
-| 💻 **Windows 10 / 11 (64-bit)** | `BestCine-Windows-x64-1.1.3.msi` | **[⬇️ Baixar para Windows (.msi)](https://github.com/BestCine/BestCine/releases/download/v1.1.3/BestCine-Windows-x64-1.1.3.msi)** |
-| 📱 **Android Celular / Tablet (64-bit — Recomendado)** | `BestCine-Android-arm64-v8a-1.1.3.apk` | **[⬇️ Baixar para Android (.apk)](https://github.com/BestCine/BestCine/releases/download/v1.1.3/BestCine-Android-arm64-v8a-1.1.3.apk)** |
-| 📱 **Android Celular Antigo (32-bit)** | `BestCine-Android-armeabi-v7a-1.1.3.apk` | **[⬇️ Baixar APK 32-bit](https://github.com/BestCine/BestCine/releases/download/v1.1.3/BestCine-Android-armeabi-v7a-1.1.3.apk)** |
-| 📱 **Android Universal (Todos os Celulares e Tablets)** | `BestCine-Android-universal-1.1.3.apk` | **[⬇️ Baixar APK Universal](https://github.com/BestCine/BestCine/releases/download/v1.1.3/BestCine-Android-universal-1.1.3.apk)** |
+| 💻 **Windows 10 / 11 (64-bit)** | `BestCine-Windows-x64-1.1.4.msi` | **[⬇️ Baixar para Windows (.msi)](https://github.com/BestCine/BestCine/releases/download/v1.1.4/BestCine-Windows-x64-1.1.4.msi)** |
+| 📱 **Android Celular / Tablet (64-bit — Recomendado)** | `BestCine-Android-arm64-v8a-1.1.4.apk` | **[⬇️ Baixar para Android (.apk)](https://github.com/BestCine/BestCine/releases/download/v1.1.4/BestCine-Android-arm64-v8a-1.1.4.apk)** |
+| 📱 **Android Celular Antigo (32-bit)** | `BestCine-Android-armeabi-v7a-1.1.4.apk` | **[⬇️ Baixar APK 32-bit](https://github.com/BestCine/BestCine/releases/download/v1.1.4/BestCine-Android-armeabi-v7a-1.1.4.apk)** |
+| 📱 **Android Universal (Todos os Celulares e Tablets)** | `BestCine-Android-universal-1.1.4.apk` | **[⬇️ Baixar APK Universal](https://github.com/BestCine/BestCine/releases/download/v1.1.4/BestCine-Android-universal-1.1.4.apk)** |
 
 > 🔄 **Atualização Automática:** Se você já possui o BestCine instalado no Windows ou no Android, basta abrir o aplicativo para receber o aviso e atualizar automaticamente!
 
