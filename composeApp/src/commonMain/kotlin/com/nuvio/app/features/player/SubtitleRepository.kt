@@ -1,5 +1,6 @@
 package com.nuvio.app.features.player
 
+import com.nuvio.app.features.tmdb.TmdbService
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -102,12 +103,27 @@ object SubtitleRepository {
         executeSubtitleLoad(type, videoId, extras)
     }
 
+    private suspend fun resolveSubtitleVideoId(type: String, videoId: String): String {
+        if (!videoId.startsWith("tmdb:", ignoreCase = true)) return videoId
+        val parts = videoId.split(":")
+        val tmdbId = parts.getOrNull(1)?.toIntOrNull() ?: return videoId
+        val imdbId = runCatching {
+            TmdbService.tmdbToImdb(tmdbId = tmdbId, mediaType = canonicalSubtitleType(type))
+        }.getOrNull()?.takeIf { it.startsWith("tt", ignoreCase = true) } ?: return videoId
+        return if (parts.size >= 4) {
+            "$imdbId:${parts[2]}:${parts[3]}"
+        } else {
+            imdbId
+        }
+    }
+
     private suspend fun executeSubtitleLoad(
         type: String,
         videoId: String,
         extras: SubtitleRequestExtras?,
     ) {
-        val requests = addonSubtitleRequests(type, videoId, extras)
+        val resolvedVideoId = resolveSubtitleVideoId(type, videoId)
+        val requests = addonSubtitleRequests(type, resolvedVideoId, extras)
         if (requests.isEmpty()) {
             _isLoading.value = false
             return

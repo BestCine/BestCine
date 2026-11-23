@@ -87,6 +87,10 @@ internal fun buildSubtitleRequestUrl(
     extraPathSegment = extras?.toPathSegment(),
 )
 
+private const val BUILTIN_OPENSUBTITLES_V3_MANIFEST_URL = "https://opensubtitles-v3.strem.io/manifest.json"
+private const val BUILTIN_OPENSUBTITLES_V3_ID = "org.stremio.opensubtitlesv3"
+private const val BUILTIN_OPENSUBTITLES_V3_NAME = "OpenSubtitles v3"
+
 internal fun addonSubtitleRequests(
     type: String,
     videoId: String,
@@ -94,7 +98,7 @@ internal fun addonSubtitleRequests(
 ): List<SubtitleAddonRequest> {
     if (ServerItemRef.isServerId(videoId)) return emptyList()
     val requestType = canonicalSubtitleType(type)
-    return AddonRepository.uiState.value.addons.enabledAddons().mapNotNull { addon ->
+    val addonRequests = AddonRepository.uiState.value.addons.enabledAddons().mapNotNull { addon ->
         val manifest = addon.manifest ?: return@mapNotNull null
         if (manifest.resources.none { resource ->
                 (resource.name.equals("subtitles", true) || resource.name.equals("subtitle", true)) &&
@@ -105,6 +109,21 @@ internal fun addonSubtitleRequests(
             addonId = manifest.id,
             addonName = addon.displayTitle,
         )
+    }
+    val hasBuiltinOpenSubtitles = addonRequests.any { req ->
+        req.addonId.equals(BUILTIN_OPENSUBTITLES_V3_ID, ignoreCase = true) ||
+            req.url.contains("opensubtitles-v3.strem.io", ignoreCase = true)
+    }
+    val supportsBuiltinOpenSubtitles = (requestType == "movie" || requestType == "series") &&
+        videoId.startsWith("tt", ignoreCase = true)
+    return if (!hasBuiltinOpenSubtitles && supportsBuiltinOpenSubtitles) {
+        addonRequests + SubtitleAddonRequest(
+            url = buildSubtitleRequestUrl(BUILTIN_OPENSUBTITLES_V3_MANIFEST_URL, requestType, videoId, extras),
+            addonId = BUILTIN_OPENSUBTITLES_V3_ID,
+            addonName = BUILTIN_OPENSUBTITLES_V3_NAME,
+        )
+    } else {
+        addonRequests
     }
 }
 
@@ -152,7 +171,7 @@ private suspend fun parseAddonSubtitles(response: String, request: SubtitleAddon
     }
 }
 
-private fun canonicalSubtitleType(type: String): String =
+internal fun canonicalSubtitleType(type: String): String =
     if (type.equals("tv", ignoreCase = true)) "series" else type.lowercase()
 
 private fun AddonResource.supportsSubtitleType(type: String, videoId: String): Boolean {
