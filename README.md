@@ -2,64 +2,59 @@
   <img src="composeApp/src/desktopMain/resources/icons/bestcine-app-icon.png" width="128" height="128" alt="BestCine Logo" />
 </p>
 
-<h1 align="center">🎬 BestCine — Aplicativo Oficial (Windows PC & Celular Android)</h1>
+<h1 align="center">🎬 BestCine (v1.1.4) — Windows PC &amp; Celular / Tablet Android</h1>
 
 <p align="center">
-  <strong>Cliente oficial da plataforma BestCine para Windows PC, Celulares e Tablets Android.</strong><br/>
-  Filmes, Séries, Canais de TV ao Vivo com Favoritos e EPG, DNS Anti-Bloqueio integrado e Atualizações Automáticas.
+  <strong>Aplicativo oficial da plataforma BestCine para Computador (Windows) e Celular / Tablet (Android).</strong><br/>
+  Filmes, Séries, TV ao Vivo com Favoritos e EPG, DNS Anti-Bloqueio e Atualização Automática.
 </p>
 
 <p align="center">
   <a href="https://github.com/BestCine/BestCine/releases/latest">
     <img src="https://img.shields.io/badge/Vers%C3%A3o_Atual-v1.1.4-1E6BFF?style=for-the-badge" alt="Versão Atual" />
   </a>
-  <a href="https://github.com/BestCine/BestCine/releases/download/v1.1.4/BestCine-Windows-x64-1.1.4.msi">
-    <img src="https://img.shields.io/badge/Windows-x64_(.msi)-0078D6?style=for-the-badge&logo=windows&logoColor=white" alt="Windows Download" />
-  </a>
-  <a href="https://github.com/BestCine/BestCine/releases/download/v1.1.4/BestCine-Android-arm64-v8a-1.1.4.apk">
-    <img src="https://img.shields.io/badge/Android-Celular_(.apk)-3DDC84?style=for-the-badge&logo=android&logoColor=white" alt="Android Download" />
-  </a>
   <a href="https://github.com/BestCine/BestCine-TV">
-    <img src="https://img.shields.io/badge/Smart_TVs-BestCine--TV-8B5CF6?style=for-the-badge&logo=youtube-tv&logoColor=white" alt="BestCine TV" />
+    <img src="https://img.shields.io/badge/Smart_TVs_%2F_Mi_Box_%2F_Fire_TV-BestCine--TV-8B5CF6?style=for-the-badge&logo=youtube-tv&logoColor=white" alt="BestCine TV" />
   </a>
   <a href="https://dsc.gg/bestcine">
     <img src="https://img.shields.io/badge/Discord-Comunidade_Oficial-5865F2?style=for-the-badge&logo=discord&logoColor=white" alt="Discord BestCine" />
   </a>
 </p>
 
-> 📺 **Usa Smart TV (LG webOS, Samsung Tizen) ou Android TV / Google TV / TV Box?**
-> Baixe a versão dedicada para TVs (mais leve, 60 FPS e feita para controle remoto) em **[BestCine/BestCine-TV](https://github.com/BestCine/BestCine-TV)**.
-
 ---
 
-## 📥 Download Oficial (v1.1.4)
+## 🎯 QUAL É O SEU APARELHO? (CLIQUE E BAIXE DIRETO — NÃO PRECISA ABRIR "ASSETS")
 
-| Plataforma | Arquivo | Link Direto |
-| :--- | :--- | :--- |
-| 💻 **Windows 10 / 11 (64-bit)** | `BestCine-Windows-x64-1.1.4.msi` | **[⬇️ Baixar para Windows (.msi)](https://github.com/BestCine/BestCine/releases/download/v1.1.4/BestCine-Windows-x64-1.1.4.msi)** |
-| 📱 **Android Celular / Tablet (64-bit — Recomendado)** | `BestCine-Android-arm64-v8a-1.1.4.apk` | **[⬇️ Baixar para Android (.apk)](https://github.com/BestCine/BestCine/releases/download/v1.1.4/BestCine-Android-arm64-v8a-1.1.4.apk)** |
-| 📱 **Android Celular Antigo (32-bit)** | `BestCine-Android-armeabi-v7a-1.1.4.apk` | **[⬇️ Baixar APK 32-bit](https://github.com/BestCine/BestCine/releases/download/v1.1.4/BestCine-Android-armeabi-v7a-1.1.4.apk)** |
-| 📱 **Android Universal (Todos os Celulares e Tablets)** | `BestCine-Android-universal-1.1.4.apk` | **[⬇️ Baixar APK Universal](https://github.com/BestCine/BestCine/releases/download/v1.1.4/BestCine-Android-universal-1.1.4.apk)** |
+> ⚠️ **ATENÇÃO ANTES DE BAIXAR!**
+> - **Celular / Tablet Android** usa toque na tela → baixe **AQUI** (item 2 abaixo).
+> - **Mi Box / TV Box / Fire TV / Google TV / Samsung / LG** usa controle remoto → baixe no **BestCine TV** (item 3 abaixo)! **NÃO instale o app de celular na TV Box ou o controle remoto não vai navegar!**
 
-> 🔄 **Atualização Automática:** Se você já possui o BestCine instalado no Windows ou no Android, basta abrir o aplicativo para receber o aviso e atualizar automaticamente!
+| Qual aparelho você vai usar? | Clique para baixar o arquivo certo |
+| :--- | :--- |
+| 💻 **Computador / Notebook Windows (10 ou 11)** | 👉 **[⬇️ BAIXAR PARA WINDOWS (.msi)](https://github.com/BestCine/BestCine/releases/download/v1.1.4/BestCine-Windows-x64-1.1.4.msi)** |
+| 📱 **Celular ou Tablet Android (Maioria — 64-bit)** | 👉 **[⬇️ BAIXAR PARA CELULAR ANDROID (.apk)](https://github.com/BestCine/BestCine/releases/download/v1.1.4/BestCine-Android-arm64-v8a-1.1.4.apk)** |
+| 📱 **Celular Android mais antigo (se o de cima não instalar)** | 👉 **[⬇️ BAIXAR APK UNIVERSAL (.apk)](https://github.com/BestCine/BestCine/releases/download/v1.1.4/BestCine-Android-universal-1.1.4.apk)** |
+| 📺 **Mi Box / TV Box / Fire TV Stick / Google TV (TCL, Philips, Sony…)** | 👉 **[⬇️ BAIXAR BESTCINE TV PARA CONTROLE REMOTO (.apk)](https://github.com/BestCine/BestCine-TV/releases/download/v1.1.4/BestCineTV-1.1.4-android-lite-armv7.apk)** |
+| 📺 **Smart TV Samsung (Tizen) ou Smart TV LG (webOS)** | 👉 **[📺 ABRIR PÁGINA DO BESTCINE TV (LG &amp; SAMSUNG)](https://github.com/BestCine/BestCine-TV)** |
+
+> 🔄 **Atualização Automática:** se você já tem o BestCine instalado no Windows ou no Celular Android, basta abrir o app para receber o aviso e atualizar automaticamente!
 
 ---
 
 ## ✨ Recursos Principais
 
-- 🔐 **Login Google & QR Code BestCine:** Conecte sua conta em 1 clique pelo navegador ou escaneando o QR Code no celular, com sincronização em tempo real do seu plano (**Gratuito**, **👑 Apoiador** ou **⭐ VIP**).
-- 📺 **TV ao Vivo com ★ Favoritos, EPG & Picture-in-Picture (PiP):** Grade completa de canais organizada por categorias, aba de Favoritos, busca rápida, programação ao vivo e janela flutuante (PiP) no Windows e Android.
-- 📚 **Biblioteca Completa:** Abas dedicadas para **Continuar assistindo**, **Favoritos** e **Histórico**.
-- 🛡️ **DNS Anti-Bloqueio (Cloudflare DoH IPv4/IPv6):** Contorna automaticamente bloqueios de operadoras sem precisar alterar configurações do Windows ou do celular.
-- 🇧🇷 **Busca Inteligente & Metadados em Português:** Temporadas/episódios completos com títulos e sinopses em PT-BR via TMDB + Cinemeta integrado.
-- 🔗 **Integrações Ativas:** Suporte completo a **Trakt**, **Simkl**, **MDBList**, **TMDB** e **Discord Rich Presence** (ativado por padrão no Windows).
+- 🔐 **Login Google &amp; QR Code BestCine:** conecte sua conta em 1 clique e sincronize automaticamente seu plano (**Gratuito**, **👑 Apoiador** ou **⭐ VIP**).
+- 📺 **TV ao Vivo com ★ Favoritos, EPG &amp; Picture-in-Picture (PiP):** grade completa por categorias, busca rápida, programação ao vivo e janela flutuante.
+- 📚 **Biblioteca Completa:** *Continuar assistindo*, *Favoritos* e *Histórico* sincronizados.
+- 🛡️ **DNS Anti-Bloqueio (Cloudflare DoH IPv4/IPv6):** contorna bloqueios de operadoras sem alterar nada no Windows ou no celular.
+- 🇧🇷 **100% Português (BR):** Home, banner de destaque (*Hero*), *Filmes Populares*, *Séries Populares*, temporadas e episódios em português via TMDB.
+- 🔗 **Integrações Ativas:** **Trakt**, **Simkl**, **MDBList**, **TMDB** e **Discord Rich Presence**.
 
 ---
 
-## 🛠️ Compilação a partir do Código-Fonte
+## 🛠️ Compilação a partir do Código-Fonte (Desenvolvedores)
 
-Este repositório disponibiliza o código-fonte completo do aplicativo cliente em conformidade com a licença **GPL-3.0**.  
-Por segurança, chaves de API externas (como `TMDB_API_KEY`, `TRAKT_CLIENT_ID`, `SIMKL_CLIENT_ID`, `MDBLIST_CLIENT_ID`) e credenciais de assinatura Android não são incluídas no repositório — configure-as localmente no arquivo `local.properties` antes de compilar:
+Este repositório disponibiliza o código-fonte completo do aplicativo cliente sob a licença **GPL-3.0**. Chaves de API externas (`TMDB_API_KEY`, `TRAKT_CLIENT_ID`, `SIMKL_CLIENT_ID`, `MDBLIST_CLIENT_ID`, `NUVIO_DISCORD_CLIENT_ID`) e credenciais de assinatura Android não ficam no repositório — configure-as em `local.properties` antes de compilar:
 
 ```bash
 # Windows MSI
@@ -71,10 +66,10 @@ Por segurança, chaves de API externas (como `TMDB_API_KEY`, `TRAKT_CLIENT_ID`, 
 
 ---
 
-## 🙏 Créditos, Agradecimentos & Licença (GPL-3.0)
+## 🙏 Créditos e Licença (GPL-3.0)
 
-O aplicativo **BestCine** é um projeto independente **não afiliado ao Nuvio**, construído como um fork modificado sobre a base open-source do projeto **[Nuvio (NuvioMedia)](https://github.com/NuvioMedia)** ([NuvioDesktop](https://github.com/NuvioMedia/NuvioDesktop) / [NuvioMobile](https://github.com/NuvioMedia/NuvioMobile)).
+O **BestCine** é um projeto independente **não afiliado ao Nuvio**, construído como um fork modificado sobre a base open-source do projeto **[Nuvio (NuvioMedia)](https://github.com/NuvioMedia)** ([NuvioDesktop](https://github.com/NuvioMedia/NuvioDesktop) / [NuvioMobile](https://github.com/NuvioMedia/NuvioMobile)).
 
-Agradecemos imensamente ao **[Tapframe](https://github.com/Tapframe)** e a todos os contribuidores da comunidade **NuvioMedia** pelo excelente trabalho na arquitetura de interface, player multimídia (`libmpv` / `Media3 ExoPlayer`) e ecossistema Kotlin Multiplatform.
+Agradecemos ao **[Tapframe](https://github.com/Tapframe)** e a todos os contribuidores da comunidade **NuvioMedia** pelo excelente trabalho na arquitetura de interface, player multimídia (`libmpv` / `Media3 ExoPlayer`) e ecossistema Kotlin Multiplatform.
 
 Distribuído sob a licença **[GNU General Public License v3.0 (GPL-3.0)](LICENSE)**.
