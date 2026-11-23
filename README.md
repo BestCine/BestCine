@@ -10,6 +10,9 @@
 </p>
 
 <p align="center">
+  <a href="https://bestcine.github.io">
+    <img src="https://img.shields.io/badge/⬇️_CENTRAL_OFICIAL_DE_DOWNLOADS-bestcine.github.io-2563EB?style=for-the-badge" alt="Baixar BestCine" />
+  </a>
   <a href="https://github.com/BestCine/BestCine/releases/latest">
     <img src="https://img.shields.io/badge/Vers%C3%A3o_Atual-v1.1.4-1E6BFF?style=for-the-badge" alt="Versão Atual" />
   </a>
@@ -20,6 +23,8 @@
     <img src="https://img.shields.io/badge/Discord-Comunidade_Oficial-5865F2?style=for-the-badge&logo=discord&logoColor=white" alt="Discord BestCine" />
   </a>
 </p>
+
+> 🌐 **JEITO MAIS FÁCIL DE BAIXAR (TODOS OS APARELHOS EM 1 PÁGINA):** acesse **[https://bestcine.github.io](https://bestcine.github.io)** e clique no botão do seu aparelho!
 
 ---
 
