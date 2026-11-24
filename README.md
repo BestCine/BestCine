@@ -5,8 +5,8 @@
 <h1 align="center">🎬 BestCine (v1.1.6) — Windows PC &amp; Celular / Tablet Android</h1>
 
 <p align="center">
-  <strong>Aplicativo oficial da plataforma BestCine para Computador (Windows) e Celular / Tablet (Android).</strong><br/>
-  Filmes, Séries, TV ao Vivo com Favoritos e EPG, DNS Anti-Bloqueio e Atualização Automática.
+  <strong>Aplicativo cliente oficial do BestCine para Computador (Windows) e Celular / Tablet (Android).</strong><br/>
+  Interface em Português (BR), Player Multimídia Nativo, Suporte a Legendas, Múltiplos Perfis e Atualização Automática.
 </p>
 
 <p align="center">
@@ -48,12 +48,14 @@
 
 ## ✨ Recursos Principais
 
-- 🔐 **Login Google &amp; QR Code BestCine:** conecte sua conta em 1 clique e sincronize automaticamente seu plano (**Gratuito**, **👑 Apoiador** ou **⭐ VIP**).
-- 📺 **TV ao Vivo com ★ Favoritos, EPG &amp; Picture-in-Picture (PiP):** grade completa por categorias, busca rápida, programação ao vivo e janela flutuante.
-- 📚 **Biblioteca Completa:** *Continuar assistindo*, *Favoritos* e *Histórico* sincronizados.
-- 🛡️ **DNS Anti-Bloqueio (Cloudflare DoH IPv4/IPv6):** contorna bloqueios de operadoras sem alterar nada no Windows ou no celular.
-- 🇧🇷 **100% Português (BR):** Home, banner de destaque (*Hero*), *Filmes Populares*, *Séries Populares*, temporadas e episódios em português via TMDB.
+- 🔐 **Login Google &amp; QR Code:** conecte sua conta em 1 clique e sincronize automaticamente suas preferências e perfis.
+- 🎬 **Player Nativo com Picture-in-Picture (PiP):** reprodução acelerada por hardware (`libmpv` / `Media3 ExoPlayer`), suporte a legendas e janela flutuante.
+- 📚 **Organização Pessoal:** *Continuar assistindo*, *Favoritos* e *Histórico* sincronizados entre dispositivos.
+- 🌐 **Conexões Criptografadas (DoH):** suporte opcional a DNS sobre HTTPS diretamente no aplicativo.
+- 🇧🇷 **100% Português (BR):** interface completa e metadados localizados em português via TMDB.
 - 🔗 **Integrações Ativas:** **Trakt**, **Simkl**, **MDBList**, **TMDB** e **Discord Rich Presence**.
+
+> ℹ️ **Aviso:** este repositório contém exclusivamente o código-fonte do aplicativo cliente / reprodutor multimídia open-source e não hospeda, armazena ou distribui qualquer conteúdo de mídia.
 
 ---
 
