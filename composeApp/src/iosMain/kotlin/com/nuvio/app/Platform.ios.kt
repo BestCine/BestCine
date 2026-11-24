@@ -1,6 +1,7 @@
 package com.nuvio.app
 
 import androidx.compose.runtime.Composable
+import androidx.compose.ui.input.pointer.PointerEvent
 import platform.UIKit.UIDevice
 
 class IOSPlatform: Platform {
@@ -17,3 +18,6 @@ internal actual val supportsPosterNavigationMotion: Boolean = false
 
 @Composable
 internal actual fun rememberIsAndroidTv(): Boolean = false
+
+internal actual fun PointerEvent.isMouseBackButtonPress(): Boolean = false
+internal actual fun PointerEvent.isMouseForwardButtonPress(): Boolean = false
