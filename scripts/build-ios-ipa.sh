@@ -54,9 +54,12 @@ fi
     CODE_SIGN_IDENTITY= \
     build
 
-app_path="${derived_data}/Build/Products/${configuration}-iphoneos/Nuvio.app"
+app_path="${derived_data}/Build/Products/${configuration}-iphoneos/BestCine.app"
 if [[ ! -d "${app_path}" ]]; then
-    echo "iOS build did not produce ${app_path}." >&2
+    app_path="${derived_data}/Build/Products/${configuration}-iphoneos/Nuvio.app"
+fi
+if [[ ! -d "${app_path}" ]]; then
+    echo "iOS build did not produce ${derived_data}/Build/Products/${configuration}-iphoneos/BestCine.app." >&2
     exit 1
 fi
 
@@ -102,10 +105,10 @@ output_directory="$(cd "${output_directory}" && pwd -P)"
 package_root="$(mktemp -d "${TMPDIR:-/tmp}/nuvio-ios-ipa.XXXXXX")"
 trap 'rm -rf "${package_root}"' EXIT
 mkdir -p "${package_root}/Payload"
-ditto "${app_path}" "${package_root}/Payload/Nuvio.app"
+ditto "${app_path}" "${package_root}/Payload/BestCine.app"
 
-ipa_path="${output_directory}/nuvio-${version}-full-${configuration_slug}.ipa"
-temporary_ipa="${package_root}/nuvio-${version}-full-${configuration_slug}.ipa"
+ipa_path="${output_directory}/BestCine-iOS-${version}.ipa"
+temporary_ipa="${package_root}/BestCine-iOS-${version}.ipa"
 (
     cd "${package_root}"
     /usr/bin/zip -qry "${temporary_ipa}" Payload

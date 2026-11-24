@@ -2,10 +2,10 @@
   <img src="composeApp/src/desktopMain/resources/icons/bestcine-app-icon.png" width="128" height="128" alt="BestCine Logo" />
 </p>
 
-<h1 align="center">🎬 BestCine (v1.1.6) — Windows PC &amp; Celular / Tablet Android</h1>
+<h1 align="center">🎬 BestCine (v1.1.7) — Windows, macOS, Linux, Android &amp; iOS</h1>
 
 <p align="center">
-  <strong>Aplicativo cliente oficial do BestCine para Computador (Windows) e Celular / Tablet (Android).</strong><br/>
+  <strong>Aplicativo cliente oficial do BestCine para Computadores (Windows, macOS e Linux) e Celulares / Tablets (Android e iOS).</strong><br/>
   Interface em Português (BR), Player Multimídia Nativo, Suporte a Legendas, Múltiplos Perfis e Atualização Automática.
 </p>
 
@@ -14,7 +14,7 @@
     <img src="https://img.shields.io/badge/⬇️_CENTRAL_OFICIAL_DE_DOWNLOADS-bestcine.github.io-2563EB?style=for-the-badge" alt="Baixar BestCine" />
   </a>
   <a href="https://github.com/BestCine/BestCine/releases/latest">
-    <img src="https://img.shields.io/badge/Vers%C3%A3o_Atual-v1.1.6-1E6BFF?style=for-the-badge" alt="Versão Atual" />
+    <img src="https://img.shields.io/badge/Vers%C3%A3o_Atual-v1.1.7-1E6BFF?style=for-the-badge" alt="Versão Atual" />
   </a>
   <a href="https://github.com/BestCine/BestCine-TV">
     <img src="https://img.shields.io/badge/Smart_TVs_%2F_Mi_Box_%2F_Fire_TV-BestCine--TV-8B5CF6?style=for-the-badge&logo=youtube-tv&logoColor=white" alt="BestCine TV" />
@@ -36,9 +36,13 @@
 
 | Qual aparelho você vai usar? | Clique para baixar o arquivo certo |
 | :--- | :--- |
-| 💻 **Computador / Notebook Windows (10 ou 11)** | 👉 **[⬇️ BAIXAR PARA WINDOWS (.msi)](https://github.com/BestCine/BestCine/releases/download/v1.1.6/BestCine-Windows-x64-1.1.6.msi)** |
-| 📱 **Celular ou Tablet Android (Maioria — 64-bit)** | 👉 **[⬇️ BAIXAR PARA CELULAR ANDROID (.apk)](https://github.com/BestCine/BestCine/releases/download/v1.1.6/BestCine-Android-arm64-v8a-1.1.6.apk)** |
-| 📱 **Celular Android mais antigo (se o de cima não instalar)** | 👉 **[⬇️ BAIXAR APK UNIVERSAL (.apk)](https://github.com/BestCine/BestCine/releases/download/v1.1.6/BestCine-Android-universal-1.1.6.apk)** |
+| 💻 **Windows PC (10 ou 11 — 64-bit)** | 👉 **[⬇️ BAIXAR PARA WINDOWS (.msi)](https://github.com/BestCine/BestCine/releases/download/v1.1.7/BestCine-Windows-x64-1.1.7.msi)** |
+| 🍎 **macOS Apple Silicon (M1, M2, M3, M4)** | 👉 **[⬇️ BAIXAR PARA MAC APPLE SILICON (.dmg)](https://github.com/BestCine/BestCine/releases/download/v1.1.7/BestCine-macOS-arm64-1.1.7.dmg)** |
+| 🍎 **macOS Intel (Macs anteriores a 2020)** | 👉 **[⬇️ BAIXAR PARA MAC INTEL (.dmg)](https://github.com/BestCine/BestCine/releases/download/v1.1.7/BestCine-macOS-x86_64-1.1.7.dmg)** |
+| 🐧 **Linux (x86_64 — Universal)** | 👉 **[⬇️ BAIXAR PARA LINUX (.AppImage)](https://github.com/BestCine/BestCine/releases/download/v1.1.7/BestCine-Linux-x86_64-1.1.7.AppImage)** |
+| 📱 **Celular ou Tablet Android (Maioria — 64-bit)** | 👉 **[⬇️ BAIXAR PARA CELULAR ANDROID (.apk)](https://github.com/BestCine/BestCine/releases/download/v1.1.7/BestCine-Android-arm64-v8a-1.1.7.apk)** |
+| 📱 **Celular Android antigo (se o de cima não instalar)** | 👉 **[⬇️ BAIXAR APK UNIVERSAL (.apk)](https://github.com/BestCine/BestCine/releases/download/v1.1.7/BestCine-Android-universal-1.1.7.apk)** |
+| 🍏 **iOS — iPhone / iPad (sideload via SideStore / AltStore / Sideloadly)** | 👉 **[⬇️ BAIXAR PARA iOS (.ipa)](https://github.com/BestCine/BestCine/releases/download/v1.1.7/BestCine-iOS-1.1.7.ipa)** |
 | 📺 **Mi Box / TV Box / Fire TV Stick / Google TV (TCL, Philips, Sony…)** | 👉 **[⬇️ BAIXAR BESTCINE TV PARA CONTROLE REMOTO (.apk)](https://github.com/BestCine/BestCine-TV/releases/latest/download/BestCineTV-android-lite-universal.apk)** |
 | 📺 **Smart TV Samsung (Tizen) ou Smart TV LG (webOS)** | 👉 **[📺 ABRIR PÁGINA DO BESTCINE TV (LG &amp; SAMSUNG)](https://github.com/BestCine/BestCine-TV)** |
 

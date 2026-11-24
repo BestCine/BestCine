@@ -1,5 +1,6 @@
 package com.nuvio.app.features.updater
 
+import com.nuvio.app.bestcine.BestCineBranding
 import com.nuvio.app.core.build.AppVersionConfig
 import kotlinx.coroutines.runBlocking
 import nuvio.composeapp.generated.resources.Res
@@ -12,10 +13,10 @@ actual object AppUpdaterPlatform {
     actual val hasSingleUpdateChannel: Boolean = false
 
     actual val releaseSource: AppUpdateReleaseSource = AppUpdateReleaseSource(
-        owner = "NuvioMedia",
-        repo = "NuvioMobile",
-        channelBranch = "cmp-rewrite",
-        userAgent = "NuvioMobile",
+        owner = BestCineBranding.GITHUB_UPDATE_OWNER,
+        repo = BestCineBranding.GITHUB_UPDATE_REPO,
+        channelBranch = null,
+        userAgent = BestCineBranding.APP_NAME,
     )
 
     actual val assetSelector: AppUpdateAssetSelector = AppUpdateAssetSelector(

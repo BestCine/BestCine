@@ -1,0 +1,466 @@
+name: Release BestCine (Windows, macOS, Linux, Android & iOS)
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Tag da release (ex.: v1.1.7)"
+        required: true
+        type: string
+      publish_release:
+        description: "Publicar GitHub Release automaticamente ao finalizar"
+        required: false
+        type: boolean
+        default: true
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-bestcine-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # 1. Windows PC (x64 .msi)
+  # ---------------------------------------------------------------------------
+  windows:
+    name: Windows PC (.msi)
+    runs-on: windows-2022
+    timeout-minutes: 45
+    env:
+      WEBVIEW2_VERSION: 1.0.4078.44
+      TAG_INPUT: ${{ inputs.tag }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Gerar local.properties a partir dos GitHub Secrets
+        shell: pwsh
+        env:
+          TMDB_API_KEY: ${{ secrets.TMDB_API_KEY }}
+          TRAKT_CLIENT_ID: ${{ secrets.TRAKT_CLIENT_ID }}
+          TRAKT_CLIENT_SECRET: ${{ secrets.TRAKT_CLIENT_SECRET }}
+          TRAKT_REDIRECT_URI: ${{ secrets.TRAKT_REDIRECT_URI }}
+          SIMKL_CLIENT_ID: ${{ secrets.SIMKL_CLIENT_ID }}
+          SIMKL_REDIRECT_URI: ${{ secrets.SIMKL_REDIRECT_URI }}
+          SIMKL_APP_NAME: ${{ secrets.SIMKL_APP_NAME }}
+          MDBLIST_CLIENT_ID: ${{ secrets.MDBLIST_CLIENT_ID }}
+          NUVIO_DISCORD_CLIENT_ID: ${{ secrets.NUVIO_DISCORD_CLIENT_ID }}
+          PREMIUMIZE_CLIENT_ID: ${{ secrets.PREMIUMIZE_CLIENT_ID }}
+          INTRODB_API_URL: ${{ secrets.INTRODB_API_URL }}
+          IMDB_RATINGS_API_BASE_URL: ${{ secrets.IMDB_RATINGS_API_BASE_URL }}
+          IMDB_TAPFRAME_API_BASE_URL: ${{ secrets.IMDB_TAPFRAME_API_BASE_URL }}
+        run: |
+          $keys = @(
+            "TMDB_API_KEY","TRAKT_CLIENT_ID","TRAKT_CLIENT_SECRET","TRAKT_REDIRECT_URI",
+            "SIMKL_CLIENT_ID","SIMKL_REDIRECT_URI","SIMKL_APP_NAME","MDBLIST_CLIENT_ID",
+            "NUVIO_DISCORD_CLIENT_ID","PREMIUMIZE_CLIENT_ID","INTRODB_API_URL",
+            "IMDB_RATINGS_API_BASE_URL","IMDB_TAPFRAME_API_BASE_URL"
+          )
+          $lines = @()
+          foreach ($k in $keys) {
+            $v = [Environment]::GetEnvironmentVariable($k)
+            if ($v) { $lines += "$k=$v" }
+          }
+          Set-Content -Path local.properties -Value $lines -Encoding utf8
+
+      - name: Instalar WebView2 SDK
+        shell: pwsh
+        run: |
+          nuget install Microsoft.Web.WebView2 `
+            -Version $env:WEBVIEW2_VERSION `
+            -OutputDirectory "$env:RUNNER_TEMP\nuget" `
+            -DirectDownload -NonInteractive -NoCache
+          $wv = Join-Path $env:RUNNER_TEMP "nuget\Microsoft.Web.WebView2.$env:WEBVIEW2_VERSION"
+          "WEBVIEW2_ROOT=$wv" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
+      - name: Compilar BestCine Windows (.msi)
+        shell: pwsh
+        run: |
+          $ver = $env:TAG_INPUT -replace '^v',''
+          & .\gradlew.bat :composeApp:packageReleaseMsi `
+            "-Pnuvio.desktop.versionName=$ver" `
+            "-Pnuvio.webview2.dir=$env:WEBVIEW2_ROOT" `
+            "-Pcompose.desktop.packaging.checkJdkVendor=false" `
+            --no-configuration-cache --no-daemon --stacktrace
+          New-Item -ItemType Directory -Force -Path dist-windows | Out-Null
+          Copy-Item "composeApp\build\compose\binaries\main-release\msi\BestCine-Windows-x64-$ver.msi" "dist-windows\"
+          Copy-Item "composeApp\build\compose\binaries\main-release\msi\BestCine-$ver.msi" "dist-windows\"
+          Get-ChildItem dist-windows
+
+      - name: Upload artefato Windows
+        uses: actions/upload-artifact@v4
+        with:
+          name: bestcine-windows
+          path: dist-windows/*.msi
+          if-no-files-found: error
+
+  # ---------------------------------------------------------------------------
+  # 2. Android Celular / Tablet (.apk assinado com keystore oficial)
+  # ---------------------------------------------------------------------------
+  android:
+    name: Android Celular & Tablet (.apk)
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      TAG_INPUT: ${{ inputs.tag }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Compilar APKs Release assinados
+        shell: bash
+        env:
+          NUVIO_KEYSTORE_BASE64: ${{ secrets.NUVIO_KEYSTORE_BASE64 }}
+          NUVIO_KEYSTORE_PASS: ${{ secrets.NUVIO_KEYSTORE_PASS }}
+          NUVIO_KEY_ALIAS: ${{ secrets.NUVIO_KEY_ALIAS }}
+          NUVIO_KEY_PASS: ${{ secrets.NUVIO_KEY_PASS }}
+          TMDB_API_KEY: ${{ secrets.TMDB_API_KEY }}
+          TRAKT_CLIENT_ID: ${{ secrets.TRAKT_CLIENT_ID }}
+          TRAKT_CLIENT_SECRET: ${{ secrets.TRAKT_CLIENT_SECRET }}
+          TRAKT_REDIRECT_URI: ${{ secrets.TRAKT_REDIRECT_URI }}
+          SIMKL_CLIENT_ID: ${{ secrets.SIMKL_CLIENT_ID }}
+          SIMKL_REDIRECT_URI: ${{ secrets.SIMKL_REDIRECT_URI }}
+          SIMKL_APP_NAME: ${{ secrets.SIMKL_APP_NAME }}
+          MDBLIST_CLIENT_ID: ${{ secrets.MDBLIST_CLIENT_ID }}
+          NUVIO_DISCORD_CLIENT_ID: ${{ secrets.NUVIO_DISCORD_CLIENT_ID }}
+          PREMIUMIZE_CLIENT_ID: ${{ secrets.PREMIUMIZE_CLIENT_ID }}
+          INTRODB_API_URL: ${{ secrets.INTRODB_API_URL }}
+          IMDB_RATINGS_API_BASE_URL: ${{ secrets.IMDB_RATINGS_API_BASE_URL }}
+          IMDB_TAPFRAME_API_BASE_URL: ${{ secrets.IMDB_TAPFRAME_API_BASE_URL }}
+        run: |
+          set -euo pipefail
+          umask 077
+          KS_PATH="${RUNNER_TEMP}/bestcine-release.jks"
+          trap 'rm -f "${KS_PATH}" local.properties' EXIT
+          printf '%s' "${NUVIO_KEYSTORE_BASE64}" | base64 -d > "${KS_PATH}"
+
+          {
+            echo "NUVIO_RELEASE_STORE_FILE=${KS_PATH}"
+            echo "NUVIO_RELEASE_STORE_PASSWORD=${NUVIO_KEYSTORE_PASS}"
+            echo "NUVIO_RELEASE_KEY_ALIAS=${NUVIO_KEY_ALIAS}"
+            echo "NUVIO_RELEASE_KEY_PASSWORD=${NUVIO_KEY_PASS}"
+            for k in TMDB_API_KEY TRAKT_CLIENT_ID TRAKT_CLIENT_SECRET TRAKT_REDIRECT_URI \
+                     SIMKL_CLIENT_ID SIMKL_REDIRECT_URI SIMKL_APP_NAME MDBLIST_CLIENT_ID \
+                     NUVIO_DISCORD_CLIENT_ID PREMIUMIZE_CLIENT_ID INTRODB_API_URL \
+                     IMDB_RATINGS_API_BASE_URL IMDB_TAPFRAME_API_BASE_URL; do
+              v="${!k:-}"
+              if [[ -n "$v" ]]; then echo "$k=$v"; fi
+            done
+          } > local.properties
+
+          VER="${TAG_INPUT#v}"
+          ./gradlew :androidApp:assembleFullRelease \
+            -Pnuvio.android.distribution=full \
+            "-Pnuvio.app.versionName=${VER}" \
+            --no-configuration-cache --no-daemon --stacktrace
+
+          mkdir -p dist-android
+          cp androidApp/build/outputs/apk/full/release/androidApp-full-arm64-v8a-release.apk   "dist-android/BestCine-Android-arm64-v8a-${VER}.apk"
+          cp androidApp/build/outputs/apk/full/release/androidApp-full-armeabi-v7a-release.apk "dist-android/BestCine-Android-armeabi-v7a-${VER}.apk"
+          cp androidApp/build/outputs/apk/full/release/androidApp-full-universal-release.apk   "dist-android/BestCine-Android-universal-${VER}.apk"
+          ls -lh dist-android
+
+      - name: Upload artefatos Android
+        uses: actions/upload-artifact@v4
+        with:
+          name: bestcine-android
+          path: dist-android/*.apk
+          if-no-files-found: error
+
+  # ---------------------------------------------------------------------------
+  # 3. macOS (.dmg — Apple Silicon arm64 & Intel x86_64)
+  # ---------------------------------------------------------------------------
+  macos:
+    name: macOS ${{ matrix.arch }} (.dmg)
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: macos-15
+            arch: arm64
+          - runner: macos-15-intel
+            arch: x86_64
+    env:
+      MACOS_ARCH: ${{ matrix.arch }}
+      TAG_INPUT: ${{ inputs.tag }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Compilar BestCine macOS (.dmg)
+        shell: bash
+        env:
+          TMDB_API_KEY: ${{ secrets.TMDB_API_KEY }}
+          TRAKT_CLIENT_ID: ${{ secrets.TRAKT_CLIENT_ID }}
+          TRAKT_CLIENT_SECRET: ${{ secrets.TRAKT_CLIENT_SECRET }}
+          TRAKT_REDIRECT_URI: ${{ secrets.TRAKT_REDIRECT_URI }}
+          SIMKL_CLIENT_ID: ${{ secrets.SIMKL_CLIENT_ID }}
+          SIMKL_REDIRECT_URI: ${{ secrets.SIMKL_REDIRECT_URI }}
+          SIMKL_APP_NAME: ${{ secrets.SIMKL_APP_NAME }}
+          MDBLIST_CLIENT_ID: ${{ secrets.MDBLIST_CLIENT_ID }}
+          NUVIO_DISCORD_CLIENT_ID: ${{ secrets.NUVIO_DISCORD_CLIENT_ID }}
+          PREMIUMIZE_CLIENT_ID: ${{ secrets.PREMIUMIZE_CLIENT_ID }}
+          INTRODB_API_URL: ${{ secrets.INTRODB_API_URL }}
+          IMDB_RATINGS_API_BASE_URL: ${{ secrets.IMDB_RATINGS_API_BASE_URL }}
+          IMDB_TAPFRAME_API_BASE_URL: ${{ secrets.IMDB_TAPFRAME_API_BASE_URL }}
+        run: |
+          set -euo pipefail
+          trap 'rm -f local.properties' EXIT
+          {
+            for k in TMDB_API_KEY TRAKT_CLIENT_ID TRAKT_CLIENT_SECRET TRAKT_REDIRECT_URI \
+                     SIMKL_CLIENT_ID SIMKL_REDIRECT_URI SIMKL_APP_NAME MDBLIST_CLIENT_ID \
+                     NUVIO_DISCORD_CLIENT_ID PREMIUMIZE_CLIENT_ID INTRODB_API_URL \
+                     IMDB_RATINGS_API_BASE_URL IMDB_TAPFRAME_API_BASE_URL; do
+              v="${!k:-}"
+              if [[ -n "$v" ]]; then echo "$k=$v"; fi
+            done
+          } > local.properties
+
+          VER="${TAG_INPUT#v}"
+          ./gradlew :composeApp:packageReleaseDmg \
+            "-Pnuvio.desktop.versionName=${VER}" \
+            "-Pnuvio.macos.arch=${MACOS_ARCH}" \
+            -Pcompose.desktop.packaging.checkJdkVendor=false \
+            --no-configuration-cache --no-daemon --stacktrace
+
+          mkdir -p dist-macos
+          cp "composeApp/build/compose/release-dmgs/BestCine-macOS-${MACOS_ARCH}-${VER}.dmg" dist-macos/
+          ls -lh dist-macos
+
+      - name: Upload artefato macOS
+        uses: actions/upload-artifact@v4
+        with:
+          name: bestcine-macos-${{ matrix.arch }}
+          path: dist-macos/*.dmg
+          if-no-files-found: error
+
+  # ---------------------------------------------------------------------------
+  # 4. Linux x86_64 (.AppImage)
+  # ---------------------------------------------------------------------------
+  linux:
+    name: Linux x64 (.AppImage)
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      TAG_INPUT: ${{ inputs.tag }}
+      APPIMAGE_TOOL_VERSION: 1.9.1
+      APPIMAGETOOL_SHA256: ed4ce84f0d9caff66f50bcca6ff6f35aae54ce8135408b3fa33abfc3cb384eb0
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Instalar dependencias Linux desktop
+        run: bash ./scripts/linux/install-desktop-build-dependencies.sh zsync
+
+      - name: Setup Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Compilar BestCine Linux (.AppImage)
+        shell: bash
+        env:
+          TMDB_API_KEY: ${{ secrets.TMDB_API_KEY }}
+          TRAKT_CLIENT_ID: ${{ secrets.TRAKT_CLIENT_ID }}
+          TRAKT_CLIENT_SECRET: ${{ secrets.TRAKT_CLIENT_SECRET }}
+          TRAKT_REDIRECT_URI: ${{ secrets.TRAKT_REDIRECT_URI }}
+          SIMKL_CLIENT_ID: ${{ secrets.SIMKL_CLIENT_ID }}
+          SIMKL_REDIRECT_URI: ${{ secrets.SIMKL_REDIRECT_URI }}
+          SIMKL_APP_NAME: ${{ secrets.SIMKL_APP_NAME }}
+          MDBLIST_CLIENT_ID: ${{ secrets.MDBLIST_CLIENT_ID }}
+          NUVIO_DISCORD_CLIENT_ID: ${{ secrets.NUVIO_DISCORD_CLIENT_ID }}
+          PREMIUMIZE_CLIENT_ID: ${{ secrets.PREMIUMIZE_CLIENT_ID }}
+          INTRODB_API_URL: ${{ secrets.INTRODB_API_URL }}
+          IMDB_RATINGS_API_BASE_URL: ${{ secrets.IMDB_RATINGS_API_BASE_URL }}
+          IMDB_TAPFRAME_API_BASE_URL: ${{ secrets.IMDB_TAPFRAME_API_BASE_URL }}
+        run: |
+          set -euo pipefail
+          trap 'rm -f local.properties' EXIT
+          {
+            for k in TMDB_API_KEY TRAKT_CLIENT_ID TRAKT_CLIENT_SECRET TRAKT_REDIRECT_URI \
+                     SIMKL_CLIENT_ID SIMKL_REDIRECT_URI SIMKL_APP_NAME MDBLIST_CLIENT_ID \
+                     NUVIO_DISCORD_CLIENT_ID PREMIUMIZE_CLIENT_ID INTRODB_API_URL \
+                     IMDB_RATINGS_API_BASE_URL IMDB_TAPFRAME_API_BASE_URL; do
+              v="${!k:-}"
+              if [[ -n "$v" ]]; then echo "$k=$v"; fi
+            done
+          } > local.properties
+
+          APPIMAGETOOL_PATH="${RUNNER_TEMP}/appimagetool-x86_64.AppImage"
+          curl -fsSL -o "${APPIMAGETOOL_PATH}" \
+            "https://github.com/AppImage/appimagetool/releases/download/${APPIMAGE_TOOL_VERSION}/appimagetool-x86_64.AppImage"
+          echo "${APPIMAGETOOL_SHA256}  ${APPIMAGETOOL_PATH}" | sha256sum -c -
+          chmod +x "${APPIMAGETOOL_PATH}"
+
+          VER="${TAG_INPUT#v}"
+          export APPIMAGETOOL="${APPIMAGETOOL_PATH}"
+          export APPIMAGE_WEBSITE_URL="https://bestcine.github.io"
+
+          ./gradlew :composeApp:packageReleaseAppImage \
+            "-Pnuvio.desktop.versionName=${VER}" \
+            -Pcompose.desktop.packaging.checkJdkVendor=false \
+            --no-configuration-cache --no-daemon --stacktrace
+
+          mkdir -p dist-linux
+          cp "composeApp/build/compose/release-appimages/BestCine-Linux-x86_64-${VER}.AppImage" dist-linux/
+          ls -lh dist-linux
+
+      - name: Upload artefato Linux
+        uses: actions/upload-artifact@v4
+        with:
+          name: bestcine-linux
+          path: dist-linux/*.AppImage
+          if-no-files-found: error
+
+  # ---------------------------------------------------------------------------
+  # 5. iOS (.ipa para sideload — SideStore / AltStore / Sideloadly / TrollStore)
+  # ---------------------------------------------------------------------------
+  ios:
+    name: iOS iPhone & iPad (.ipa)
+    runs-on: macos-15
+    timeout-minutes: 75
+    env:
+      TAG_INPUT: ${{ inputs.tag }}
+      IOS_CONFIGURATION: Release
+      GRADLE_OPTS: -Dfile.encoding=UTF-8
+      KOTLIN_DAEMON_JVMARGS: -Xmx2048M
+      NUVIO_GRADLE_JVMARGS: -Xmx4608M -Dfile.encoding=UTF-8 -XX:MaxMetaspaceSize=768M
+      NUVIO_KOTLIN_NATIVE_JVMARGS: -Xmx4608M
+    steps:
+      - name: Checkout (com submodulo MPVKit)
+        uses: actions/checkout@v4
+        with:
+          submodules: true
+
+      - name: Setup Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Cache Kotlin Native
+        uses: actions/cache@v4
+        with:
+          path: ~/.konan
+          key: konan-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('gradle/libs.versions.toml') }}
+          restore-keys: |
+            konan-${{ runner.os }}-${{ runner.arch }}-
+
+      - name: Compilar BestCine iOS (.ipa)
+        shell: bash
+        env:
+          TMDB_API_KEY: ${{ secrets.TMDB_API_KEY }}
+          TRAKT_CLIENT_ID: ${{ secrets.TRAKT_CLIENT_ID }}
+          TRAKT_CLIENT_SECRET: ${{ secrets.TRAKT_CLIENT_SECRET }}
+          TRAKT_REDIRECT_URI: ${{ secrets.TRAKT_REDIRECT_URI }}
+          SIMKL_CLIENT_ID: ${{ secrets.SIMKL_CLIENT_ID }}
+          SIMKL_REDIRECT_URI: ${{ secrets.SIMKL_REDIRECT_URI }}
+          SIMKL_APP_NAME: ${{ secrets.SIMKL_APP_NAME }}
+          MDBLIST_CLIENT_ID: ${{ secrets.MDBLIST_CLIENT_ID }}
+          NUVIO_DISCORD_CLIENT_ID: ${{ secrets.NUVIO_DISCORD_CLIENT_ID }}
+          PREMIUMIZE_CLIENT_ID: ${{ secrets.PREMIUMIZE_CLIENT_ID }}
+          INTRODB_API_URL: ${{ secrets.INTRODB_API_URL }}
+          IMDB_RATINGS_API_BASE_URL: ${{ secrets.IMDB_RATINGS_API_BASE_URL }}
+          IMDB_TAPFRAME_API_BASE_URL: ${{ secrets.IMDB_TAPFRAME_API_BASE_URL }}
+        run: |
+          set -euo pipefail
+          xcodebuild -version
+          xcrun --sdk iphoneos --show-sdk-version
+          trap 'rm -f local.properties' EXIT
+          {
+            for k in TMDB_API_KEY TRAKT_CLIENT_ID TRAKT_CLIENT_SECRET TRAKT_REDIRECT_URI \
+                     SIMKL_CLIENT_ID SIMKL_REDIRECT_URI SIMKL_APP_NAME MDBLIST_CLIENT_ID \
+                     NUVIO_DISCORD_CLIENT_ID PREMIUMIZE_CLIENT_ID INTRODB_API_URL \
+                     IMDB_RATINGS_API_BASE_URL IMDB_TAPFRAME_API_BASE_URL; do
+              v="${!k:-}"
+              if [[ -n "$v" ]]; then echo "$k=$v"; fi
+            done
+          } > local.properties
+
+          VER="${TAG_INPUT#v}"
+          ./scripts/prepare-ios-dependencies.sh
+          ./scripts/build-ios-ipa.sh "${VER}"
+          ls -lh build/ios-ipa
+
+      - name: Upload artefato iOS
+        uses: actions/upload-artifact@v4
+        with:
+          name: bestcine-ios
+          path: build/ios-ipa/*.ipa
+          if-no-files-found: error
+
+  # ---------------------------------------------------------------------------
+  # 6. Publicar GitHub Release Unificada
+  # ---------------------------------------------------------------------------
+  publish:
+    name: Publicar Release BestCine
+    needs: [windows, android, macos, linux, ios]
+    if: inputs.publish_release && always() && needs.windows.result == 'success' && needs.android.result == 'success' && needs.macos.result == 'success' && needs.linux.result == 'success'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download de todos os artefatos
+        uses: actions/download-artifact@v4
+        with:
+          path: release-assets
+          merge-multiple: true
+
+      - name: Listar artefatos prontos
+        run: ls -lh release-assets
+
+      - name: Publicar Release no GitHub
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ inputs.tag }}
+          name: BestCine ${{ inputs.tag }}
+          files: release-assets/*
+          body: |
+            ## 🎬 BestCine ${{ inputs.tag }} — Windows, macOS, Linux, Android & iOS
+
+            ### 🌐 Portal Oficial de Downloads
+            👉 **https://bestcine.github.io**
+
+            ### 📦 Instaladores desta versão
+            - **Windows PC (x64):** `BestCine-Windows-x64-*.msi`
+            - **macOS Apple Silicon (M1–M4):** `BestCine-macOS-arm64-*.dmg`
+            - **macOS Intel:** `BestCine-macOS-x86_64-*.dmg`
+            - **Linux (x64):** `BestCine-Linux-x86_64-*.AppImage`
+            - **Android Celular/Tablet:** `BestCine-Android-arm64-v8a-*.apk`, `armeabi-v7a` e `universal`
+            - **iOS (iPhone / iPad — sideload via SideStore / AltStore / Sideloadly / TrollStore):** `BestCine-iOS-*.ipa`
