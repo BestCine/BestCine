@@ -75,6 +75,8 @@ import androidx.compose.ui.zIndex
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.nuvio.app.core.ui.DisintegrationRequest
 import com.nuvio.app.core.ui.LocalNuvioNavBarScrollState
+import com.nuvio.app.core.ui.NativeNavigationTab
+import com.nuvio.app.core.ui.NativeTabBridge
 import com.nuvio.app.core.ui.NuvioLoadingIndicator
 import com.nuvio.app.core.ui.NuvioNavBarScrollState
 import com.nuvio.app.core.ui.NuvioTokens
@@ -279,8 +281,12 @@ internal fun AppTabHost(
             }
 
             AppScreenTab.Tv -> {
+                val activeNativeTab by NativeTabBridge.activeNativeTab.collectAsStateWithLifecycle()
+                val isTvTabVisible = selectedTab == AppScreenTab.Tv &&
+                    state.tabsRouteActiveState.value &&
+                    (activeNativeTab == null || activeNativeTab == NativeNavigationTab.Tv)
                 BestCineTvScreen(
-                    isSelectedTab = selectedTab == AppScreenTab.Tv && state.tabsRouteActiveState.value,
+                    isSelectedTab = isTvTabVisible,
                     modifier = contentModifier,
                     topChromePadding = state.topChromePadding,
                     onPlayFullscreen = { launch -> actions.onPlayBestCineTv?.invoke(launch) },

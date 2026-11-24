@@ -334,17 +334,22 @@ final class TabNavigationCoordinator: ObservableObject {
 @available(iOS 16.0, *)
 enum NuvioAppTab: String, CaseIterable, Hashable {
     case home = "Home"
+    case tv = "Tv"
     case search = "Search"
     case library = "Library"
     case settings = "Settings"
 
     var fallbackTitle: String {
-        String(localized: String.LocalizationValue(rawValue))
+        switch self {
+        case .tv: return "TV"
+        default: return String(localized: String.LocalizationValue(rawValue))
+        }
     }
 
     static func from(kotlinName: String?) -> NuvioAppTab? {
         switch kotlinName?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() {
         case "home": return .home
+        case "tv", "livetv", "bestcinetv": return .tv
         case "search": return .search
         case "library": return .library
         case "settings", "profile": return .settings
@@ -355,6 +360,7 @@ enum NuvioAppTab: String, CaseIterable, Hashable {
     var iconAssetName: String {
         switch self {
         case .home: return "NuvioTabHome"
+        case .tv: return "NuvioTabTv"
         case .search: return "NuvioTabSearch"
         case .library: return "NuvioTabLibrary"
         case .settings: return "NuvioTabProfile"
@@ -364,6 +370,7 @@ enum NuvioAppTab: String, CaseIterable, Hashable {
     var fallbackSystemImage: String {
         switch self {
         case .home: return "house.fill"
+        case .tv: return "tv"
         case .search: return "magnifyingglass"
         case .library: return "rectangle.stack.fill"
         case .settings: return "person.crop.circle.fill"
@@ -641,7 +648,13 @@ final class NativeProfileTabInteractionCoordinator: NSObject, UIGestureRecognize
 @available(iOS 16.0, *)
 @MainActor
 final class AppNavigationCoordinator: ObservableObject {
-    @Published var selectedTab: NuvioAppTab = .home
+    @Published var selectedTab: NuvioAppTab = .home {
+        didSet {
+            if oldValue != selectedTab {
+                NativeTabBridgeKt.nativeActiveTabChanged(tabName: selectedTab.rawValue)
+            }
+        }
+    }
     @Published private(set) var isMainContentMounted = false
     @Published private(set) var isMainContentVisible = false
     @Published private(set) var isAppReady = false
@@ -651,6 +664,7 @@ final class AppNavigationCoordinator: ObservableObject {
     @Published var isProfileSwitcherPresented = false
 
     let homeCoordinator = TabNavigationCoordinator()
+    let tvCoordinator = TabNavigationCoordinator()
     let searchCoordinator = TabNavigationCoordinator()
     let libraryCoordinator = TabNavigationCoordinator()
     let settingsCoordinator = TabNavigationCoordinator()
@@ -659,6 +673,7 @@ final class AppNavigationCoordinator: ObservableObject {
     let profileTabInteraction = NativeProfileTabInteractionCoordinator()
 
     init() {
+        NativeTabBridgeKt.nativeActiveTabChanged(tabName: selectedTab.rawValue)
         profileTabInteraction.onLongPress = { [weak self] in
             guard let self, self.isAppReady else { return }
             self.isProfileSwitcherPresented = true
@@ -666,12 +681,13 @@ final class AppNavigationCoordinator: ObservableObject {
     }
 
     private var allCoordinators: [TabNavigationCoordinator] {
-        [homeCoordinator, searchCoordinator, libraryCoordinator, settingsCoordinator]
+        [homeCoordinator, tvCoordinator, searchCoordinator, libraryCoordinator, settingsCoordinator]
     }
 
     func coordinator(for tab: NuvioAppTab) -> TabNavigationCoordinator {
         switch tab {
         case .home: return homeCoordinator
+        case .tv: return tvCoordinator
         case .search: return searchCoordinator
         case .library: return libraryCoordinator
         case .settings: return settingsCoordinator
@@ -699,6 +715,7 @@ final class AppNavigationCoordinator: ObservableObject {
     ) {
         localizedTabTitles = [
             .home: home,
+            .tv: "TV",
             .search: search,
             .library: library,
             .settings: profile,

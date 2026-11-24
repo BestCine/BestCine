@@ -23,6 +23,8 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.asPaddingValues
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
@@ -31,6 +33,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.statusBars
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
@@ -166,7 +169,9 @@ internal fun BestCineTvScreen(
     }
 
     LaunchedEffect(isSelectedTab) {
-        if (!isSelectedTab) {
+        if (isSelectedTab) {
+            BestCineTvRepository.ensureCatalogLoaded(forceRefresh = false)
+        } else {
             if (uiState.isFullscreen) {
                 exitFullscreen()
             }
@@ -319,8 +324,9 @@ internal fun BestCineTvScreen(
         animationSpec = tween(durationMillis = 220, easing = FastOutSlowInEasing),
         label = "tv_screen_background",
     )
+    val statusBarTopPadding = WindowInsets.statusBars.asPaddingValues().calculateTopPadding()
     val animatedTopPadding by animateDpAsState(
-        targetValue = if (isFullscreen) 0.dp else (topChromePadding ?: 12.dp),
+        targetValue = if (isFullscreen) 0.dp else (topChromePadding ?: (statusBarTopPadding + 12.dp)),
         animationSpec = tween(durationMillis = 220, easing = FastOutSlowInEasing),
         label = "tv_top_padding",
     )

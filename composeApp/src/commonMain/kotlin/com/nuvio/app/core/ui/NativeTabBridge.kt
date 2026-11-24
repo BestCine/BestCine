@@ -14,14 +14,18 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharedFlow
+import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.receiveAsFlow
 import kotlinx.coroutines.launch
 
 internal enum class NativeNavigationTab {
     Home,
+    Tv,
     Search,
     Library,
     Settings,
@@ -37,8 +41,15 @@ internal object NativeTabBridge {
     private val _requestedTabs = MutableSharedFlow<NativeNavigationTab>(extraBufferCapacity = 1)
     val requestedTabs: SharedFlow<NativeNavigationTab> = _requestedTabs.asSharedFlow()
 
+    private val _activeNativeTab = MutableStateFlow<NativeNavigationTab?>(null)
+    val activeNativeTab: StateFlow<NativeNavigationTab?> = _activeNativeTab.asStateFlow()
+
     fun requestTab(tabName: String) {
         _requestedTabs.tryEmit(NativeNavigationTab.fromName(tabName))
+    }
+
+    fun notifyActiveTab(tabName: String) {
+        _activeNativeTab.value = NativeNavigationTab.fromName(tabName)
     }
 
     fun publishSelectedTab(tab: NativeNavigationTab) {
@@ -194,6 +205,10 @@ class NativeProfileSwitcherController {
 
 fun nativeTabSelect(tabName: String) {
     NativeTabBridge.requestTab(tabName)
+}
+
+fun nativeActiveTabChanged(tabName: String) {
+    NativeTabBridge.notifyActiveTab(tabName)
 }
 
 internal expect fun isLiquidGlassNativeTabBarSupported(): Boolean
