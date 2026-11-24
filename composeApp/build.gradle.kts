@@ -1109,7 +1109,10 @@ kotlin {
         iosTarget.binaries.framework {
             baseName = "ComposeApp"
             isStatic = true
-            freeCompilerArgs += listOf("-Xbinary=bundleId=$iosFrameworkBundleId")
+            freeCompilerArgs += listOf(
+                "-Xbinary=bundleId=$iosFrameworkBundleId",
+                "-Xdisable-phases=DevirtualizationAnalysis",
+            )
             if (iosDistribution == "full") {
                 linkerOpts(
                     "-lc++",
