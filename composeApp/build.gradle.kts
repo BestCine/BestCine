@@ -1111,7 +1111,7 @@ kotlin {
             isStatic = true
             freeCompilerArgs += listOf(
                 "-Xbinary=bundleId=$iosFrameworkBundleId",
-                "-Xdisable-phases=DevirtualizationAnalysis",
+                "-Xdisable-phases=BuildDFG,DevirtualizationAnalysis,PreCodegenInliner,RemoveRedundantCallsToStaticInitializersPhase,Devirtualization,DCEPhase,EscapeAnalysis",
             )
             if (iosDistribution == "full") {
                 linkerOpts(
