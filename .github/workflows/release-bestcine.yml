@@ -8,11 +8,12 @@ on:
         required: true
         type: string
       targets:
-        description: "Alvos a compilar (all ou ios-only)"
+        description: "Alvos a compilar (all, desktop-and-android ou ios-only)"
         required: false
         type: choice
         options:
           - all
+          - desktop-and-android
           - ios-only
         default: all
       publish_release:
@@ -34,7 +35,7 @@ jobs:
   # ---------------------------------------------------------------------------
   windows:
     name: Windows PC (.msi)
-    if: (inputs.targets || 'all') == 'all'
+    if: (inputs.targets || 'all') == 'all' || inputs.targets == 'desktop-and-android'
     runs-on: windows-2022
     timeout-minutes: 45
     env:
@@ -43,6 +44,15 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+
+      - name: Baixar runtime Windows (Git LFS)
+        shell: bash
+        run: |
+          set -euo pipefail
+          git lfs pull --include="composeApp/src/desktopMain/native/windows/runtime/**" --exclude=""
+          size="$(wc -c < composeApp/src/desktopMain/native/windows/runtime/libmpv-2.dll)"
+          echo "libmpv-2.dll size: ${size} bytes"
+          (( size > 1000000 ))
 
       - name: Setup Java 17
         uses: actions/setup-java@v4
@@ -119,7 +129,7 @@ jobs:
   # ---------------------------------------------------------------------------
   android:
     name: Android Celular & Tablet (.apk)
-    if: (inputs.targets || 'all') == 'all'
+    if: (inputs.targets || 'all') == 'all' || inputs.targets == 'desktop-and-android'
     runs-on: ubuntu-latest
     timeout-minutes: 45
     env:
@@ -202,7 +212,7 @@ jobs:
   # ---------------------------------------------------------------------------
   macos:
     name: macOS ${{ matrix.arch }} (.dmg)
-    if: (inputs.targets || 'all') == 'all'
+    if: (inputs.targets || 'all') == 'all' || inputs.targets == 'desktop-and-android'
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 45
     strategy:
@@ -219,6 +229,15 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+
+      - name: Baixar runtime macOS (Git LFS)
+        shell: bash
+        run: |
+          set -euo pipefail
+          git lfs pull --include="composeApp/src/desktopMain/native/macos/runtime/${MACOS_ARCH}/**" --exclude=""
+          size="$(wc -c < "composeApp/src/desktopMain/native/macos/runtime/${MACOS_ARCH}/libmpv.2.dylib")"
+          echo "libmpv.2.dylib (${MACOS_ARCH}) size: ${size} bytes"
+          (( size > 1000000 ))
 
       - name: Setup Java 17
         uses: actions/setup-java@v4
@@ -281,7 +300,7 @@ jobs:
   # ---------------------------------------------------------------------------
   linux:
     name: Linux x64 (.AppImage)
-    if: (inputs.targets || 'all') == 'all'
+    if: (inputs.targets || 'all') == 'all' || inputs.targets == 'desktop-and-android'
     runs-on: ubuntu-latest
     timeout-minutes: 45
     env:
@@ -364,6 +383,7 @@ jobs:
   # ---------------------------------------------------------------------------
   ios:
     name: iOS iPhone & iPad (.ipa)
+    if: (inputs.targets || 'all') == 'all' || inputs.targets == 'ios-only'
     runs-on: macos-15
     timeout-minutes: 75
     env:
@@ -446,7 +466,7 @@ jobs:
     if: >-
       inputs.publish_release && always() && (
         ((inputs.targets || 'all') == 'ios-only' && needs.ios.result == 'success') ||
-        ((inputs.targets || 'all') == 'all' && needs.windows.result == 'success' && needs.android.result == 'success' && needs.macos.result == 'success' && needs.linux.result == 'success')
+        (((inputs.targets || 'all') == 'all' || inputs.targets == 'desktop-and-android') && needs.windows.result == 'success' && needs.android.result == 'success' && needs.macos.result == 'success' && needs.linux.result == 'success')
       )
     runs-on: ubuntu-latest
     steps:
