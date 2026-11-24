@@ -424,7 +424,7 @@ object BestCineTvRepository {
                     it.copy(
                         isLoadingCatalog = false,
                         hasLoadedOnce = true,
-                        catalogError = "Não foi possível carregar os canais ao vivo: ${error.message ?: "erro de conexão"}",
+                        catalogError = "Não foi possível carregar os canais ao vivo no momento. Verifique sua conexão e tente novamente.",
                     )
                 }
             },

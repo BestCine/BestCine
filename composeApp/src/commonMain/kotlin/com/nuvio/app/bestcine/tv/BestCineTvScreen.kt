@@ -445,7 +445,11 @@ internal fun BestCineTvScreen(
                                     overflow = TextOverflow.Ellipsis,
                                 )
                                 Text(
-                                    text = "${filteredChannels.size} canais disponíveis",
+                                    text = if (filteredChannels.size == 1) {
+                                        "1 canal disponível"
+                                    } else {
+                                        "${filteredChannels.size} canais disponíveis"
+                                    },
                                     style = MaterialTheme.typography.bodySmall,
                                     color = tokens.colors.textMuted,
                                 )
@@ -1242,9 +1246,50 @@ private fun BestCineTvSplitPlayerLayout(
                                         readyController.setMuted(true)
                                     }
                                 },
-                                onSnapshot = { snap -> snapshot = snap },
+                                onSnapshot = { snap ->
+                                    snapshot = snap
+                                    if (snap.isPlaying) {
+                                        playerError = null
+                                    }
+                                },
                                 onError = { err -> playerError = err },
                             )
+                        }
+                        if (playerError != null) {
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxSize()
+                                    .background(Color(0xE6080C16))
+                                    .padding(horizontal = 20.dp),
+                                contentAlignment = Alignment.Center,
+                            ) {
+                                Column(
+                                    horizontalAlignment = Alignment.CenterHorizontally,
+                                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Rounded.LiveTv,
+                                        contentDescription = null,
+                                        tint = BestCineBranding.PrimaryBlueBright,
+                                        modifier = Modifier.size(30.dp),
+                                    )
+                                    Text(
+                                        text = "Canal em manutenção ou indisponível",
+                                        style = MaterialTheme.typography.titleSmall,
+                                        color = Color.White,
+                                        fontWeight = FontWeight.SemiBold,
+                                    )
+                                    Text(
+                                        text = if (activeStreams.size > 1) {
+                                            "Tente selecionar outra fonte abaixo ou escolha outro canal."
+                                        } else {
+                                            "Tente outra alternativa ou volte novamente mais tarde."
+                                        },
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = tokens.colors.textMuted,
+                                    )
+                                }
+                            }
                         }
                     } else {
                         Text(
@@ -1560,9 +1605,13 @@ private fun BestCineTvSplitPlayerLayout(
                                     }
                                 }
 
-                                playerError?.let { err ->
+                                if (playerError != null) {
                                     Text(
-                                        text = "Aviso do player: $err (tente outra fonte abaixo se disponível)",
+                                        text = if (activeStreams.size > 1) {
+                                            "Canal em manutenção nesta fonte. Tente outra opção abaixo ou escolha outro canal."
+                                        } else {
+                                            "Canal em manutenção ou temporariamente indisponível. Tente outra alternativa."
+                                        },
                                         style = MaterialTheme.typography.bodySmall,
                                         color = tokens.colors.danger,
                                     )
