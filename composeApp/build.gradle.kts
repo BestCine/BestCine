@@ -1113,6 +1113,7 @@ kotlin {
                 "-Xbinary=bundleId=$iosFrameworkBundleId",
                 "-Xdisable-phases=BuildDFG,DevirtualizationAnalysis,PreCodegenInliner,RemoveRedundantCallsToStaticInitializersPhase,Devirtualization,DCEPhase,EscapeAnalysis",
             )
+            linkerOpts("-framework", "SafariServices")
             if (iosDistribution == "full") {
                 linkerOpts(
                     "-lc++",
