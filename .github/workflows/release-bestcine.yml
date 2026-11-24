@@ -384,16 +384,16 @@ jobs:
   ios:
     name: iOS iPhone & iPad (.ipa)
     if: (inputs.targets || 'all') == 'all' || inputs.targets == 'ios-only'
-    runs-on: macos-15
+    runs-on: macos-15-intel
     timeout-minutes: 120
     env:
       TAG_INPUT: ${{ inputs.tag }}
       IOS_CONFIGURATION: Release
       GRADLE_OPTS: -Dfile.encoding=UTF-8
-      ORG_GRADLE_PROJECT_kotlin.daemon.jvmargs: -Xmx1536M
+      ORG_GRADLE_PROJECT_kotlin.daemon.jvmargs: -Xmx2048M
       ORG_GRADLE_PROJECT_kotlin.native.disableCompilerDaemon: "true"
-      NUVIO_GRADLE_JVMARGS: -Xmx2560M -Dfile.encoding=UTF-8 -XX:MaxMetaspaceSize=512M
-      NUVIO_KOTLIN_NATIVE_JVMARGS: -Xmx3584M
+      NUVIO_GRADLE_JVMARGS: -Xmx3072M -Dfile.encoding=UTF-8 -XX:MaxMetaspaceSize=768M
+      NUVIO_KOTLIN_NATIVE_JVMARGS: -Xmx8192M
     steps:
       - name: Checkout
         uses: actions/checkout@v4
