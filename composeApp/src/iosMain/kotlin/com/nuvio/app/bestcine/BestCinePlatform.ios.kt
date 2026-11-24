@@ -42,7 +42,6 @@ import platform.posix.accept
 import platform.posix.bind
 import platform.posix.close
 import platform.posix.getsockname
-import platform.posix.inet_addr
 import platform.posix.listen
 import platform.posix.poll
 import platform.posix.pollfd
@@ -272,7 +271,8 @@ internal actual object BestCinePlatformAuth {
         addr.sin_len = sizeOf<sockaddr_in>().toUByte()
         addr.sin_family = AF_INET.toUByte()
         addr.sin_port = 0u
-        addr.sin_addr.s_addr = inet_addr("127.0.0.1")
+        // 127.0.0.1 em network byte order (iOS arm64/x86_64 é little-endian: 0x0100007F)
+        addr.sin_addr.s_addr = 0x0100007Fu
 
         if (bind(fd, addr.ptr.reinterpret(), sizeOf<sockaddr_in>().convert()) != 0) {
             close(fd)
