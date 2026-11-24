@@ -5,6 +5,8 @@
 package com.nuvio.app.controller
 
 import androidx.compose.runtime.Immutable
+import io.ktor.util.date.GMTDate
+import kotlin.concurrent.Volatile
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharedFlow
@@ -147,7 +149,7 @@ object ControllerManager {
     private var lastControllerInputEpochMs: Long = 0L
 
     fun notifyControllerInput(): Boolean {
-        lastControllerInputEpochMs = System.currentTimeMillis()
+        lastControllerInputEpochMs = GMTDate().timestamp
         notifyNavigationInput()
         val transitioned = !_isControllerActive.value
         if (transitioned) {
@@ -158,7 +160,7 @@ object ControllerManager {
 
     /** Marks spatial navigation as active without enabling controller-only hint UI. */
     fun notifyNavigationInput(): Boolean {
-        lastControllerInputEpochMs = System.currentTimeMillis()
+        lastControllerInputEpochMs = GMTDate().timestamp
         val transitioned = !_isNavigationActive.value
         if (transitioned) {
             _isNavigationActive.value = true
@@ -168,7 +170,7 @@ object ControllerManager {
 
     fun notifyMouseOrKeyboardInput() {
         // Guard against synthetic AWT mouse move events fired immediately during layout/cursor changes
-        val elapsed = System.currentTimeMillis() - lastControllerInputEpochMs
+        val elapsed = GMTDate().timestamp - lastControllerInputEpochMs
         if (elapsed < 180L) return
         if (_isControllerActive.value) {
             _isControllerActive.value = false
