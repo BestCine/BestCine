@@ -195,9 +195,18 @@ jobs:
             --no-configuration-cache --no-daemon --stacktrace
 
           mkdir -p dist-android
-          cp androidApp/build/outputs/apk/full/release/androidApp-full-arm64-v8a-release.apk   "dist-android/BestCine-Android-arm64-v8a-${VER}.apk"
-          cp androidApp/build/outputs/apk/full/release/androidApp-full-armeabi-v7a-release.apk "dist-android/BestCine-Android-armeabi-v7a-${VER}.apk"
-          cp androidApp/build/outputs/apk/full/release/androidApp-full-universal-release.apk   "dist-android/BestCine-Android-universal-${VER}.apk"
+          APK_OUT="dist-android/BestCine-Android-universal-${VER}.apk"
+          if [[ -f androidApp/build/outputs/apk/full/release/androidApp-full-release.apk ]]; then
+            cp androidApp/build/outputs/apk/full/release/androidApp-full-release.apk "${APK_OUT}"
+          else
+            cp androidApp/build/outputs/apk/full/release/androidApp-full-universal-release.apk "${APK_OUT}"
+          fi
+          actual_abis="$(unzip -Z1 "${APK_OUT}" | sed -n 's#^lib/\([^/][^/]*\)/.*#\1#p' | sort -u)"
+          expected_abis="$(printf '%s\n' arm64-v8a armeabi-v7a | sort -u)"
+          if [[ "${actual_abis}" != "${expected_abis}" ]]; then
+            echo "ABIs inesperadas no APK universal: ${actual_abis}" >&2
+            exit 1
+          fi
           ls -lh dist-android
 
       - name: Upload artefatos Android

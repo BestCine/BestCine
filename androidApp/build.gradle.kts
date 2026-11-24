@@ -73,6 +73,9 @@ android {
         versionCode = releaseAppVersionCode
         versionName = releaseAppVersionName
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+        ndk {
+            abiFilters += listOf("arm64-v8a", "armeabi-v7a")
+        }
     }
 
     flavorDimensions += "distribution"
@@ -115,10 +118,7 @@ android {
 
     splits {
         abi {
-            isEnable = buildsReleaseApks
-            reset()
-            include("armeabi-v7a", "arm64-v8a", "x86", "x86_64")
-            isUniversalApk = true
+            isEnable = false
         }
     }
 
