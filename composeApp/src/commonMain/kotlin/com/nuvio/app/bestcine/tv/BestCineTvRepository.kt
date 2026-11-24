@@ -29,23 +29,100 @@ object BestCineTvRepository {
     val uiState: StateFlow<BestCineTvUiState> = _uiState.asStateFlow()
 
     private const val EPG_CACHE_TTL_MS = 5 * 60_000L
+    private const val STABLE_FAV_PREFIX = "bc_ch::"
     private data class CachedEpg(val details: BestCineTvEpgDetails, val fetchedAtMs: Long)
     private val epgCache = mutableMapOf<String, CachedEpg>()
     private var favoritesLoaded = false
+    private var persistedFavoriteKeys: Set<String> = emptySet()
 
-    private fun ensureFavoritesLoaded(): Set<String> {
+    private fun normalizeKeyPart(value: String): String =
+        value.trim().lowercase().replace(Regex("\\s+"), " ")
+
+    private fun isVolatileBestCineChannelId(channelId: String): Boolean =
+        channelId.trim().startsWith("bestcine_tv_", ignoreCase = true)
+
+    private fun stableFavoriteKey(channel: BestCineTvChannel): String =
+        if (isVolatileBestCineChannelId(channel.id)) {
+            "$STABLE_FAV_PREFIX${normalizeKeyPart(channel.group)}::${normalizeKeyPart(channel.name)}"
+        } else {
+            channel.id.trim()
+        }
+
+    private fun extractStableFavoriteName(key: String): String? {
+        if (!key.startsWith(STABLE_FAV_PREFIX)) return null
+        val rest = key.removePrefix(STABLE_FAV_PREFIX)
+        val sep = rest.indexOf("::")
+        return if (sep >= 0) rest.substring(sep + 2).takeIf { it.isNotEmpty() } else rest.takeIf { it.isNotEmpty() }
+    }
+
+    private fun ensurePersistedFavoritesLoaded(): Set<String> {
         if (!favoritesLoaded) {
             favoritesLoaded = true
-            val loaded = runCatching { BestCinePlatformStorage.loadTvFavoriteChannelIds() }.getOrDefault(emptySet())
-            _uiState.update { state ->
-                state.copy(
-                    favoriteChannelIds = loaded,
-                    categories = buildCategories(state.channels, loaded),
-                )
-            }
-            return loaded
+            persistedFavoriteKeys = runCatching { BestCinePlatformStorage.loadTvFavoriteChannelIds() }
+                .getOrDefault(emptySet())
         }
-        return _uiState.value.favoriteChannelIds
+        return persistedFavoriteKeys
+    }
+
+    /**
+     * Resolve os favoritos persistidos contra a grade atual de canais.
+     * Migra automaticamente IDs numéricos voláteis (`bestcine_tv_<index>`) para chaves estáveis
+     * baseadas em grupo + nome normalizado (`bc_ch::<grupo>::<nome>`), preservando favoritos
+     * mesmo quando os índices dos canais mudam no servidor ou após atualizações do app.
+     */
+    private fun resolveAndMigrateFavorites(channels: List<BestCineTvChannel>): Set<String> {
+        val loaded = ensurePersistedFavoritesLoaded()
+        if (channels.isEmpty() || loaded.isEmpty()) return emptySet()
+
+        val updatedPersisted = loaded.toMutableSet()
+        var migrated = false
+
+        val byId = channels.associateBy { it.id }
+        val byStableKey = channels.groupBy { stableFavoriteKey(it) }
+        val byNormName = channels.groupBy { normalizeKeyPart(it.name) }
+
+        val resolvedIds = linkedSetOf<String>()
+
+        loaded.forEach { key ->
+            if (key.startsWith(STABLE_FAV_PREFIX)) {
+                val exactMatches = byStableKey[key].orEmpty()
+                if (exactMatches.isNotEmpty()) {
+                    exactMatches.forEach { resolvedIds += it.id }
+                } else {
+                    val savedName = extractStableFavoriteName(key)
+                    val fallbackMatches = if (savedName != null) byNormName[savedName].orEmpty() else emptyList()
+                    if (fallbackMatches.isNotEmpty()) {
+                        fallbackMatches.forEach { resolvedIds += it.id }
+                        if (fallbackMatches.size == 1) {
+                            val newKey = stableFavoriteKey(fallbackMatches.first())
+                            if (newKey != key) {
+                                updatedPersisted.remove(key)
+                                updatedPersisted.add(newKey)
+                                migrated = true
+                            }
+                        }
+                    }
+                }
+            } else {
+                val direct = byId[key]
+                if (direct != null) {
+                    resolvedIds += direct.id
+                    if (isVolatileBestCineChannelId(key)) {
+                        val stable = stableFavoriteKey(direct)
+                        updatedPersisted.remove(key)
+                        updatedPersisted.add(stable)
+                        migrated = true
+                    }
+                }
+            }
+        }
+
+        if (migrated) {
+            persistedFavoriteKeys = updatedPersisted
+            runCatching { BestCinePlatformStorage.saveTvFavoriteChannelIds(updatedPersisted) }
+        }
+
+        return resolvedIds
     }
 
     private fun buildCategories(
@@ -68,13 +145,38 @@ object BestCineTvRepository {
     fun toggleFavoriteChannel(channelId: String) {
         val cleanId = channelId.trim()
         if (cleanId.isEmpty()) return
-        val currentFavs = ensureFavoritesLoaded()
-        val nextFavs = if (cleanId in currentFavs) currentFavs - cleanId else currentFavs + cleanId
-        runCatching { BestCinePlatformStorage.saveTvFavoriteChannelIds(nextFavs) }
+        val currentPersisted = ensurePersistedFavoritesLoaded().toMutableSet()
+        val channels = _uiState.value.channels
+        val channel = channels.firstOrNull { it.id == cleanId }
+
+        val targetKey = channel?.let(::stableFavoriteKey) ?: cleanId
+        val targetNormName = channel?.let { normalizeKeyPart(it.name) }
+
+        val matchingKeys = currentPersisted.filter { key ->
+            key == cleanId ||
+                key == targetKey ||
+                (targetNormName != null && key.startsWith(STABLE_FAV_PREFIX) && extractStableFavoriteName(key) == targetNormName &&
+                    channels.none { other -> other.id != cleanId && stableFavoriteKey(other) == key })
+        }
+
+        if (matchingKeys.isNotEmpty()) {
+            currentPersisted.removeAll(matchingKeys.toSet())
+        } else {
+            currentPersisted.add(targetKey)
+        }
+
+        persistedFavoriteKeys = currentPersisted
+        runCatching { BestCinePlatformStorage.saveTvFavoriteChannelIds(currentPersisted) }
+
+        val resolvedIds = if (channels.isNotEmpty()) {
+            resolveAndMigrateFavorites(channels)
+        } else {
+            currentPersisted
+        }
         _uiState.update { state ->
             state.copy(
-                favoriteChannelIds = nextFavs,
-                categories = buildCategories(state.channels, nextFavs),
+                favoriteChannelIds = resolvedIds,
+                categories = buildCategories(state.channels, resolvedIds),
             )
         }
     }
@@ -245,7 +347,7 @@ object BestCineTvRepository {
                         )
                     }
 
-                val favoriteIds = ensureFavoritesLoaded()
+                val favoriteIds = resolveAndMigrateFavorites(channels)
                 val categories = buildCategories(channels, favoriteIds)
 
                 if (forceRefresh) {

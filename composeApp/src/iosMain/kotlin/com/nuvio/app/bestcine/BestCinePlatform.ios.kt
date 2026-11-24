@@ -1,16 +1,38 @@
 package com.nuvio.app.bestcine
 
 import platform.Foundation.NSDate
+import platform.Foundation.NSUserDefaults
 import platform.Foundation.timeIntervalSince1970
 
+private const val IOS_KEY_SESSION_JSON = "bestcine_account_session_json"
+private const val IOS_KEY_TV_FAVORITES = "bestcine_tv_favorite_channel_ids"
+
 internal actual object BestCinePlatformStorage {
-    private var memorySession: String? = null
-    private var memoryTvFavorites: Set<String> = emptySet()
-    actual fun loadSessionJson(): String? = memorySession
-    actual fun saveSessionJson(payload: String) { memorySession = payload }
-    actual fun clearSession() { memorySession = null }
-    actual fun loadTvFavoriteChannelIds(): Set<String> = memoryTvFavorites
-    actual fun saveTvFavoriteChannelIds(ids: Set<String>) { memoryTvFavorites = ids }
+    private val defaults: NSUserDefaults
+        get() = NSUserDefaults.standardUserDefaults
+
+    actual fun loadSessionJson(): String? = defaults.stringForKey(IOS_KEY_SESSION_JSON)
+
+    actual fun saveSessionJson(payload: String) {
+        defaults.setObject(payload, forKey = IOS_KEY_SESSION_JSON)
+    }
+
+    actual fun clearSession() {
+        defaults.removeObjectForKey(IOS_KEY_SESSION_JSON)
+    }
+
+    actual fun loadTvFavoriteChannelIds(): Set<String> {
+        val raw = defaults.stringForKey(IOS_KEY_TV_FAVORITES).orEmpty()
+        return raw.lineSequence()
+            .map(String::trim)
+            .filter { it.isNotEmpty() }
+            .toSet()
+    }
+
+    actual fun saveTvFavoriteChannelIds(ids: Set<String>) {
+        val cleaned = ids.map(String::trim).filter { it.isNotEmpty() }.toSet()
+        defaults.setObject(cleaned.joinToString("\n"), forKey = IOS_KEY_TV_FAVORITES)
+    }
 }
 
 internal actual object BestCinePlatformAuth {

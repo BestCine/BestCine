@@ -162,8 +162,24 @@ internal object DesktopStorage {
 
         private fun persist() {
             Files.createDirectories(file.parent)
-            Files.newOutputStream(file).use { output ->
-                properties.store(output, "Nuvio desktop preferences")
+            val tmpFile = file.resolveSibling("${file.fileName}.tmp")
+            Files.newOutputStream(tmpFile).use { output ->
+                properties.store(output, "BestCine desktop preferences")
+                output.flush()
+            }
+            try {
+                Files.move(
+                    tmpFile,
+                    file,
+                    java.nio.file.StandardCopyOption.REPLACE_EXISTING,
+                    java.nio.file.StandardCopyOption.ATOMIC_MOVE,
+                )
+            } catch (_: Throwable) {
+                Files.move(
+                    tmpFile,
+                    file,
+                    java.nio.file.StandardCopyOption.REPLACE_EXISTING,
+                )
             }
         }
     }
