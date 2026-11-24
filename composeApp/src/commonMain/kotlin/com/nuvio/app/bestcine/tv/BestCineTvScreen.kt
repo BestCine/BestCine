@@ -12,6 +12,7 @@ import androidx.compose.animation.fadeOut
 import androidx.compose.animation.shrinkHorizontally
 import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -83,6 +84,8 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.CornerRadius
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
@@ -138,6 +141,18 @@ internal fun BestCineTvScreen(
     val isWindowFullscreen = isFullscreenActionActive()
     var enteredWindowFullscreenByTv by remember { mutableStateOf(false) }
     var previousWindowFullscreen by remember { mutableStateOf(isWindowFullscreen) }
+    var epgBrtMinute by remember { mutableStateOf(BestCineTvRepository.currentBrtMinute()) }
+
+    LaunchedEffect(isSelectedTab) {
+        if (!isSelectedTab) return@LaunchedEffect
+        while (true) {
+            val currentMin = BestCineTvRepository.currentBrtMinute()
+            if (epgBrtMinute != currentMin) {
+                epgBrtMinute = currentMin
+            }
+            delay(60_000L)
+        }
+    }
 
     fun enterFullscreen() {
         if (uiState.activeChannel == null || uiState.activeStream == null) return
@@ -644,6 +659,7 @@ internal fun BestCineTvScreen(
                         isSelectedTab = isSelectedTab,
                         isFullscreen = isFullscreen,
                         isCompactMobile = isCompactMobile,
+                        epgBrtMinute = epgBrtMinute,
                         channels = filteredChannels.ifEmpty { uiState.channels },
                         favoriteChannelIds = uiState.favoriteChannelIds,
                         activeChannel = uiState.activeChannel!!,
@@ -696,6 +712,7 @@ internal fun BestCineTvScreen(
                         items(filteredChannels, key = { it.id }) { channel ->
                             BestCineTvGridCard(
                                 channel = channel,
+                                epgBrtMinute = epgBrtMinute,
                                 isFavorite = channel.id in uiState.favoriteChannelIds,
                                 isOpening = uiState.openingChannelId == channel.id,
                                 enabled = uiState.openingChannelId == null,
@@ -781,6 +798,7 @@ private fun BestCineTvCategoriesSidebar(
 private fun BestCineTvSplitPlayerLayout(
     isSelectedTab: Boolean,
     isFullscreen: Boolean,
+    epgBrtMinute: Int,
     channels: List<BestCineTvChannel>,
     favoriteChannelIds: Set<String>,
     activeChannel: BestCineTvChannel,
@@ -993,14 +1011,25 @@ private fun BestCineTvSplitPlayerLayout(
                                     maxLines = 1,
                                     overflow = TextOverflow.Ellipsis,
                                 )
-                                val firstEpg = channel.epgSummary
-                                    .lineSequence()
-                                    .map(String::trim)
-                                    .firstOrNull { it.isNotEmpty() }
-                                    .orEmpty()
-                                if (firstEpg.isNotBlank()) {
+                                val epgWindow = channel.epgWindow
+                                if (epgWindow != null) {
                                     Text(
-                                        text = firstEpg,
+                                        text = epgWindow.title,
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = if (isActive) BestCineBranding.PrimaryBlueBright else tokens.colors.textSecondary,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis,
+                                    )
+                                    Spacer(modifier = Modifier.height(3.dp))
+                                    BestCineEpgProgressBar(
+                                        startLabel = epgWindow.startLabel,
+                                        endLabel = epgWindow.endLabel,
+                                        progress = epgWindow.progressAtBrtMinute(epgBrtMinute),
+                                        compact = true,
+                                    )
+                                } else if (channel.epgFirstLine.isNotEmpty()) {
+                                    Text(
+                                        text = channel.epgFirstLine,
                                         style = MaterialTheme.typography.labelSmall,
                                         color = if (isActive) BestCineBranding.PrimaryBlueBright else tokens.colors.textMuted,
                                         maxLines = 1,
@@ -1588,6 +1617,7 @@ private fun BestCineTvSplitPlayerLayout(
                         BestCineTvEpgPanel(
                             channel = activeChannel,
                             epgDetails = activeEpgDetails,
+                            epgBrtMinute = epgBrtMinute,
                             isLoading = isLoadingEpg,
                             bottomExtraPadding = if (isCompactMobile) 92.dp else 14.dp,
                             modifier = Modifier
@@ -1605,6 +1635,7 @@ private fun BestCineTvSplitPlayerLayout(
 private fun BestCineTvEpgPanel(
     channel: BestCineTvChannel,
     epgDetails: BestCineTvEpgDetails?,
+    epgBrtMinute: Int,
     isLoading: Boolean,
     bottomExtraPadding: androidx.compose.ui.unit.Dp = 14.dp,
     modifier: Modifier = Modifier,
@@ -1653,6 +1684,7 @@ private fun BestCineTvEpgPanel(
             val upcoming = epgDetails?.upcomingLines.orEmpty()
 
             if (nowLine != null) {
+                val nowWindow = epgDetails?.nowWindow
                 Surface(
                     shape = RoundedCornerShape(10.dp),
                     color = BestCineBranding.PrimaryBlue.copy(alpha = 0.14f),
@@ -1661,14 +1693,22 @@ private fun BestCineTvEpgPanel(
                 ) {
                     Column(
                         modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
-                        verticalArrangement = Arrangement.spacedBy(6.dp),
+                        verticalArrangement = Arrangement.spacedBy(7.dp),
                     ) {
                         Text(
-                            text = nowLine,
+                            text = nowWindow?.title ?: nowLine,
                             style = MaterialTheme.typography.titleSmall,
                             color = Color.White,
                             fontWeight = FontWeight.SemiBold,
                         )
+                        if (nowWindow != null) {
+                            BestCineEpgProgressBar(
+                                startLabel = nowWindow.startLabel,
+                                endLabel = nowWindow.endLabel,
+                                progress = nowWindow.progressAtBrtMinute(epgBrtMinute),
+                                compact = false,
+                            )
+                        }
                         if (!synopsis.isNullOrBlank()) {
                             Text(
                                 text = synopsis,
@@ -1734,6 +1774,7 @@ private fun BestCineTvEpgPanel(
 @Composable
 private fun BestCineTvGridCard(
     channel: BestCineTvChannel,
+    epgBrtMinute: Int,
     isFavorite: Boolean,
     isOpening: Boolean,
     enabled: Boolean,
@@ -1828,21 +1869,34 @@ private fun BestCineTvGridCard(
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                 )
-                if (channel.epgSummary.isNotBlank()) {
-                    val firstLine = channel.epgSummary
-                        .lineSequence()
-                        .map(String::trim)
-                        .firstOrNull { it.isNotEmpty() }
-                        .orEmpty()
-                    if (firstLine.isNotBlank()) {
+                val epgWindow = channel.epgWindow
+                if (epgWindow != null) {
+                    Text(
+                        text = epgWindow.title,
+                        style = MaterialTheme.typography.labelSmall,
+                        color = tokens.colors.textSecondary,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                    Spacer(modifier = Modifier.height(3.dp))
+                    BestCineEpgProgressBar(
+                        startLabel = epgWindow.startLabel,
+                        endLabel = epgWindow.endLabel,
+                        progress = epgWindow.progressAtBrtMinute(epgBrtMinute),
+                        compact = true,
+                    )
+                } else {
+                    if (channel.epgFirstLine.isNotEmpty()) {
                         Text(
-                            text = firstLine,
+                            text = channel.epgFirstLine,
                             style = MaterialTheme.typography.labelSmall,
                             color = tokens.colors.textMuted,
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis,
                         )
                     }
+                    // Mantém altura visual uniforme com os cards que exibem a barra de progresso
+                    Spacer(modifier = Modifier.height(15.dp))
                 }
             }
         }
@@ -1907,5 +1961,61 @@ private fun CompactSearchField(
                 )
             }
         }
+    }
+}
+
+private val EpgTrackColor = Color(0x24FFFFFF)
+private val EpgProgressColor = Color(0xFFEF4444)
+
+@Composable
+private fun BestCineEpgProgressBar(
+    startLabel: String,
+    endLabel: String,
+    progress: Float,
+    compact: Boolean,
+    modifier: Modifier = Modifier,
+) {
+    val tokens = MaterialTheme.nuvio
+    val barHeight = if (compact) 3.5.dp else 5.dp
+    val fontSize = if (compact) 9.5.sp else 11.sp
+    val clampedProgress = progress.coerceIn(0.02f, 1f)
+    Row(
+        modifier = modifier.fillMaxWidth(),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(6.dp),
+    ) {
+        Text(
+            text = startLabel,
+            fontSize = fontSize,
+            lineHeight = fontSize,
+            color = tokens.colors.textMuted,
+            maxLines = 1,
+        )
+        Canvas(
+            modifier = Modifier
+                .weight(1f)
+                .height(barHeight),
+        ) {
+            val radius = size.height * 0.5f
+            val corner = CornerRadius(radius, radius)
+            drawRoundRect(
+                color = EpgTrackColor,
+                size = size,
+                cornerRadius = corner,
+            )
+            val fillWidth = (size.width * clampedProgress).coerceAtLeast(size.height)
+            drawRoundRect(
+                color = EpgProgressColor,
+                size = Size(fillWidth.coerceAtMost(size.width), size.height),
+                cornerRadius = corner,
+            )
+        }
+        Text(
+            text = endLabel,
+            fontSize = fontSize,
+            lineHeight = fontSize,
+            color = tokens.colors.textMuted,
+            maxLines = 1,
+        )
     }
 }

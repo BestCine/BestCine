@@ -24,8 +24,28 @@ data class BestCineTvMetaResponseDto(
     val meta: BestCineTvMetaDto? = null,
 )
 
+data class BestCineTvEpgWindow(
+    val title: String,
+    val startLabel: String,
+    val endLabel: String,
+    val startMinutes: Int,
+    val endMinutes: Int,
+    val durationMinutes: Int,
+) {
+    fun progressAtBrtMinute(brtMinute: Int): Float {
+        if (durationMinutes <= 0) return 0f
+        val elapsed = if (endMinutes > startMinutes) {
+            brtMinute - startMinutes
+        } else {
+            if (brtMinute >= startMinutes) brtMinute - startMinutes else (1440 - startMinutes) + brtMinute
+        }
+        return (elapsed.toFloat() / durationMinutes.toFloat()).coerceIn(0.02f, 1f)
+    }
+}
+
 data class BestCineTvEpgDetails(
     val nowLine: String? = null,
+    val nowWindow: BestCineTvEpgWindow? = null,
     val synopsis: String? = null,
     val upcomingLines: List<String> = emptyList(),
     val footerLine: String? = null,
@@ -39,6 +59,8 @@ data class BestCineTvChannel(
     val logoUrl: String?,
     val backgroundUrl: String?,
     val epgSummary: String,
+    val epgFirstLine: String = "",
+    val epgWindow: BestCineTvEpgWindow? = null,
 )
 
 data class BestCineTvCategoryItem(

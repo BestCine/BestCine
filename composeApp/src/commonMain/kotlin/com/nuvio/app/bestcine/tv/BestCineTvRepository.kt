@@ -30,6 +30,41 @@ object BestCineTvRepository {
 
     private const val EPG_CACHE_TTL_MS = 5 * 60_000L
     private const val STABLE_FAV_PREFIX = "bc_ch::"
+    private val epgNowRegex = Regex(
+        """Agora\s*\(\s*(\d{2}):(\d{2})\s*[–—-]\s*(\d{2}):(\d{2})\s*\)\s*:\s*(.+)""",
+        RegexOption.IGNORE_CASE,
+    )
+
+    internal fun currentBrtMinute(): Int =
+        ((((bestCineCurrentTimeMillis() / 60_000L) - 180L) % 1440L + 1440L) % 1440L).toInt()
+
+    internal fun parseEpgWindow(rawText: String): BestCineTvEpgWindow? {
+        if (rawText.isBlank()) return null
+        val firstLine = rawText
+            .lineSequence()
+            .map(String::trim)
+            .firstOrNull { it.contains("agora", ignoreCase = true) }
+            ?: return null
+        val match = epgNowRegex.find(firstLine) ?: return null
+        val sh = match.groupValues[1].toIntOrNull() ?: return null
+        val sm = match.groupValues[2].toIntOrNull() ?: return null
+        val eh = match.groupValues[3].toIntOrNull() ?: return null
+        val em = match.groupValues[4].toIntOrNull() ?: return null
+        val title = match.groupValues[5].trim().ifEmpty { return null }
+        if (sh !in 0..23 || sm !in 0..59 || eh !in 0..23 || em !in 0..59) return null
+        val startMin = sh * 60 + sm
+        val endMin = eh * 60 + em
+        val duration = if (endMin > startMin) endMin - startMin else (1440 - startMin) + endMin
+        if (duration <= 0 || duration > 12 * 60) return null
+        return BestCineTvEpgWindow(
+            title = title,
+            startLabel = "${match.groupValues[1]}:${match.groupValues[2]}",
+            endLabel = "${match.groupValues[3]}:${match.groupValues[4]}",
+            startMinutes = startMin,
+            endMinutes = endMin,
+            durationMinutes = duration,
+        )
+    }
     private data class CachedEpg(val details: BestCineTvEpgDetails, val fetchedAtMs: Long)
     private val epgCache = mutableMapOf<String, CachedEpg>()
     private var favoritesLoaded = false
@@ -285,6 +320,7 @@ object BestCineTvRepository {
 
         return BestCineTvEpgDetails(
             nowLine = nowLine,
+            nowWindow = nowLine?.let(::parseEpgWindow),
             synopsis = synopsisLines.joinToString("\n").takeIf { it.isNotBlank() },
             upcomingLines = upcomingLines,
             footerLine = footerLine,
@@ -327,26 +363,33 @@ object BestCineTvRepository {
         val result = runCatching {
             withContext(Dispatchers.Default) {
                 val payload = fetchAddonResponseText(catalogUrl, forceRefresh = forceRefresh)
-                json.decodeFromString<BestCineTvCatalogResponseDto>(payload)
-            }
-        }
-
-        result.fold(
-            onSuccess = { dto ->
-                val channels = dto.metas
+                val dto = json.decodeFromString<BestCineTvCatalogResponseDto>(payload)
+                dto.metas
                     .filter { it.id.isNotBlank() && it.name.isNotBlank() }
                     .map { meta ->
                         val groupName = meta.genres.firstOrNull { it.isNotBlank() }?.trim() ?: "Outros"
+                        val summary = meta.description.orEmpty().trim()
+                        val firstLine = summary
+                            .lineSequence()
+                            .map(String::trim)
+                            .firstOrNull { it.isNotEmpty() }
+                            .orEmpty()
                         BestCineTvChannel(
                             id = meta.id.trim(),
                             name = meta.name.trim(),
                             group = groupName,
                             logoUrl = meta.poster?.takeIf { it.isNotBlank() },
                             backgroundUrl = meta.background?.takeIf { it.isNotBlank() } ?: meta.poster?.takeIf { it.isNotBlank() },
-                            epgSummary = meta.description.orEmpty().trim(),
+                            epgSummary = summary,
+                            epgFirstLine = firstLine,
+                            epgWindow = parseEpgWindow(firstLine),
                         )
                     }
+            }
+        }
 
+        result.fold(
+            onSuccess = { channels ->
                 val favoriteIds = resolveAndMigrateFavorites(channels)
                 val categories = buildCategories(channels, favoriteIds)
 
