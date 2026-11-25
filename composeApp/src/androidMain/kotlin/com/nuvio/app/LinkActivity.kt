@@ -3,12 +3,16 @@ package com.nuvio.app
 import android.app.Activity
 import android.content.Intent
 import android.os.Bundle
+import com.nuvio.app.bestcine.BestCinePlatformAuth
 import com.nuvio.app.features.settings.AppIconPlatform
 
 class LinkActivity : Activity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         intent?.dataString?.let { link ->
+            if (link.startsWith("bestcine://auth/bestcine", ignoreCase = true)) {
+                BestCinePlatformAuth.deliverDeepLinkCallback(link)
+            }
             startActivity(
                 Intent(Intent.ACTION_MAIN).apply {
                     addCategory(Intent.CATEGORY_LAUNCHER)

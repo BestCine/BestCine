@@ -8,7 +8,12 @@ import android.net.Uri
 import android.os.Bundle
 import com.nuvio.app.features.addons.AddonHttpClientProvider
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 import okhttp3.Request
 import java.io.BufferedReader
@@ -77,14 +82,41 @@ internal actual object BestCinePlatformAuth {
     private val json = Json { ignoreUnknownKeys = true }
     private val secureRandom = SecureRandom()
 
+    @Serializable
+    private data class AppPollResponse(
+        val ready: Boolean = false,
+        val code: String? = null,
+    )
+
     @Volatile
     private var activeServerSocket: ServerSocket? = null
 
     @Volatile
+    private var activeExpectedState: String? = null
+
+    @Volatile
+    private var activeCapturedCode: AtomicReference<String?>? = null
+
+    @Volatile
     private var cancelledByUser: Boolean = false
+
+    fun deliverDeepLinkCallback(rawUrl: String) {
+        val rawQuery = rawUrl.substringAfter('?', "")
+        if (rawQuery.isBlank()) return
+        val params = parseQuery(rawQuery)
+        val returnedState = params["state"].orEmpty()
+        val returnedCode = params["code"].orEmpty()
+        val expected = activeExpectedState
+        if (!expected.isNullOrBlank() && returnedState == expected && returnedCode.isNotBlank()) {
+            activeCapturedCode?.set(returnedCode)
+            runCatching { activeServerSocket?.close() }
+        }
+    }
 
     actual fun cancelPendingLogin() {
         cancelledByUser = true
+        activeExpectedState = null
+        activeCapturedCode = null
         runCatching { activeServerSocket?.close() }
         activeServerSocket = null
     }
@@ -100,6 +132,8 @@ internal actual object BestCinePlatformAuth {
         val expectedState = generateRandomState()
         val capturedCode = AtomicReference<String?>(null)
         val callbackError = AtomicReference<String?>(null)
+        activeExpectedState = expectedState
+        activeCapturedCode = capturedCode
 
         val serverSocket = runCatching {
             ServerSocket(0, 8, InetAddress.getByName("127.0.0.1")).apply {
@@ -119,81 +153,121 @@ internal actual object BestCinePlatformAuth {
         if (!opened) {
             runCatching { serverSocket.close() }
             activeServerSocket = null
+            activeExpectedState = null
+            activeCapturedCode = null
             return@withContext BestCineAuthResult.Error("Não foi possível abrir o navegador do Android.")
         }
 
-        try {
-            val deadline = System.currentTimeMillis() + 180_000L
-            while (!cancelledByUser && capturedCode.get() == null && callbackError.get() == null) {
-                val remaining = (deadline - System.currentTimeMillis()).toInt()
-                if (remaining <= 0) break
-                serverSocket.soTimeout = remaining.coerceAtLeast(1_000)
-
-                val client = try {
-                    serverSocket.accept()
-                } catch (_: SocketTimeoutException) {
-                    break
-                } catch (_: Throwable) {
-                    break
-                }
-
-                client.use { socket ->
-                    socket.soTimeout = 5_000
-                    val reader = BufferedReader(InputStreamReader(socket.getInputStream(), StandardCharsets.UTF_8))
-                    val requestLine = reader.readLine().orEmpty()
-                    // Consome cabeçalhos HTTP restantes
-                    while (true) {
-                        val h = reader.readLine()
-                        if (h.isNullOrEmpty()) break
-                    }
-
-                    val pathAndQuery = requestLine.split(' ').getOrNull(1).orEmpty()
-                    if (pathAndQuery.startsWith("/callback")) {
-                        val rawQuery = pathAndQuery.substringAfter('?', "")
-                        val params = parseQuery(rawQuery)
-                        val returnedState = params["state"].orEmpty()
-                        val returnedCode = params["code"].orEmpty()
-
-                        val isSuccess = returnedState == expectedState && returnedCode.isNotBlank()
-                        if (isSuccess) {
-                            capturedCode.set(returnedCode)
-                        } else {
-                            callbackError.set("Validação de login inválida. Tente novamente pelo aplicativo BestCine.")
+        // Camada tripla de conclusão:
+        // 1) Deep link `bestcine://auth/bestcine?code=...&state=...` (LinkActivity)
+        // 2) Servidor local `127.0.0.1:<port>/callback`
+        // 3) Polling `/api/app/poll?state=<state>` (imune a PWA/WebAPK/MIUI!)
+        coroutineScope {
+            val pollJob = launch {
+                val pollUrl = "$cleanOrigin/api/app/poll?state=${URLEncoder.encode(expectedState, "UTF-8")}"
+                delay(1_800L)
+                val pollDeadline = System.currentTimeMillis() + 180_000L
+                while (isActive && !cancelledByUser && capturedCode.get() == null && callbackError.get() == null && System.currentTimeMillis() < pollDeadline) {
+                    runCatching {
+                        val req = Request.Builder()
+                            .url(pollUrl)
+                            .header("Accept", "application/json")
+                            .header("Cache-Control", "no-store")
+                            .get()
+                            .build()
+                        AddonHttpClientProvider.get().newCall(req).execute().use { resp ->
+                            if (resp.isSuccessful) {
+                                val text = resp.body?.string().orEmpty()
+                                val parsedPoll = json.decodeFromString<AppPollResponse>(text)
+                                if (parsedPoll.ready && !parsedPoll.code.isNullOrBlank()) {
+                                    capturedCode.set(parsedPoll.code)
+                                    runCatching { serverSocket.close() }
+                                }
+                            }
                         }
-
-                        val html = buildCallbackHtml(
-                            success = isSuccess,
-                            title = if (isSuccess) "Login concluído no BestCine!" else "Não foi possível validar o login",
-                            message = if (isSuccess) {
-                                "Sua conta foi autenticada com sucesso. Voltando automaticamente para o aplicativo BestCine..."
-                            } else {
-                                "Feche esta aba e tente entrar novamente pelo aplicativo BestCine."
-                            },
-                        )
-                        val bodyBytes = html.toByteArray(StandardCharsets.UTF_8)
-                        val statusLine = if (isSuccess) "HTTP/1.1 200 OK" else "HTTP/1.1 400 Bad Request"
-                        val headerBytes = (
-                            "$statusLine\r\n" +
-                                "Content-Type: text/html; charset=utf-8\r\n" +
-                                "Cache-Control: no-store\r\n" +
-                                "Content-Length: ${bodyBytes.size}\r\n" +
-                                "Connection: close\r\n\r\n"
-                            ).toByteArray(StandardCharsets.UTF_8)
-
-                        val out = socket.getOutputStream()
-                        out.write(headerBytes)
-                        out.write(bodyBytes)
-                        out.flush()
-                    } else {
-                        val notFound = "HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
-                        socket.getOutputStream().write(notFound.toByteArray(StandardCharsets.UTF_8))
-                        socket.getOutputStream().flush()
                     }
+                    if (capturedCode.get() != null) break
+                    delay(1_500L)
                 }
             }
-        } finally {
-            runCatching { serverSocket.close() }
-            if (activeServerSocket === serverSocket) activeServerSocket = null
+
+            try {
+                val deadline = System.currentTimeMillis() + 180_000L
+                while (!cancelledByUser && capturedCode.get() == null && callbackError.get() == null) {
+                    val remaining = (deadline - System.currentTimeMillis()).toInt()
+                    if (remaining <= 0) break
+                    serverSocket.soTimeout = remaining.coerceAtLeast(1_000)
+
+                    val client = try {
+                        serverSocket.accept()
+                    } catch (_: SocketTimeoutException) {
+                        break
+                    } catch (_: Throwable) {
+                        break
+                    }
+
+                    client.use { socket ->
+                        socket.soTimeout = 5_000
+                        val reader = BufferedReader(InputStreamReader(socket.getInputStream(), StandardCharsets.UTF_8))
+                        val requestLine = reader.readLine().orEmpty()
+                        while (true) {
+                            val h = reader.readLine()
+                            if (h.isNullOrEmpty()) break
+                        }
+
+                        val pathAndQuery = requestLine.split(' ').getOrNull(1).orEmpty()
+                        if (pathAndQuery.startsWith("/callback")) {
+                            val rawQuery = pathAndQuery.substringAfter('?', "")
+                            val params = parseQuery(rawQuery)
+                            val returnedState = params["state"].orEmpty()
+                            val returnedCode = params["code"].orEmpty()
+
+                            val isSuccess = returnedState == expectedState && returnedCode.isNotBlank()
+                            if (isSuccess) {
+                                capturedCode.set(returnedCode)
+                            } else {
+                                callbackError.set("Validação de login inválida. Tente novamente pelo aplicativo BestCine.")
+                            }
+
+                            val html = buildCallbackHtml(
+                                success = isSuccess,
+                                title = if (isSuccess) "Login concluído no BestCine!" else "Não foi possível validar o login",
+                                message = if (isSuccess) {
+                                    "Sua conta foi autenticada com sucesso. Voltando automaticamente para o aplicativo BestCine..."
+                                } else {
+                                    "Feche esta aba e tente entrar novamente pelo aplicativo BestCine."
+                                },
+                            )
+                            val bodyBytes = html.toByteArray(StandardCharsets.UTF_8)
+                            val statusLine = if (isSuccess) "HTTP/1.1 200 OK" else "HTTP/1.1 400 Bad Request"
+                            val headerBytes = (
+                                "$statusLine\r\n" +
+                                    "Content-Type: text/html; charset=utf-8\r\n" +
+                                    "Cache-Control: no-store\r\n" +
+                                    "Content-Length: ${bodyBytes.size}\r\n" +
+                                    "Connection: close\r\n\r\n"
+                                ).toByteArray(StandardCharsets.UTF_8)
+
+                            val out = socket.getOutputStream()
+                            out.write(headerBytes)
+                            out.write(bodyBytes)
+                            out.flush()
+                        } else {
+                            val notFound = "HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+                            socket.getOutputStream().write(notFound.toByteArray(StandardCharsets.UTF_8))
+                            socket.getOutputStream().flush()
+                        }
+                    }
+                }
+            } finally {
+                pollJob.cancel()
+                runCatching { serverSocket.close() }
+                if (activeServerSocket === serverSocket) activeServerSocket = null
+                if (activeExpectedState == expectedState) {
+                    activeExpectedState = null
+                    activeCapturedCode = null
+                }
+            }
         }
 
         if (cancelledByUser) {
