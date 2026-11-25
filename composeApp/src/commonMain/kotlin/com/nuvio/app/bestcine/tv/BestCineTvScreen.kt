@@ -109,6 +109,7 @@ import com.nuvio.app.bestcine.BestCineBranding
 import com.nuvio.app.bestcine.cast.BestCineCastController
 import com.nuvio.app.bestcine.cast.BestCineCastDialog
 import com.nuvio.app.bestcine.cast.BestCineCastMedia
+import com.nuvio.app.bestcine.cast.BestCineCastPlayerLockOverlay
 import com.nuvio.app.isDesktop
 import com.nuvio.app.core.ui.NuvioLoadingIndicator
 import com.nuvio.app.core.ui.PlatformBackHandler
@@ -1155,44 +1156,13 @@ private fun BestCineTvSplitPlayerLayout(
                     ) {
                         val isCastingNow = castState.isCasting || castState.isConnecting
                         if (isCastingNow) {
-                            // Desmonta o player local enquanto transmite na TV para:
-                            // 1) Nunca sair áudio/vídeo no celular e na TV ao mesmo tempo;
-                            // 2) Liberar a conexão IPTV única (evita congelamentos/travamentos!).
-                            Column(
-                                modifier = Modifier
-                                    .fillMaxSize()
-                                    .background(Color(0xFF0A1020))
-                                    .clickable { showCastDialog = true }
-                                    .padding(18.dp),
-                                horizontalAlignment = Alignment.CenterHorizontally,
-                                verticalArrangement = Arrangement.Center,
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Rounded.CastConnected,
-                                    contentDescription = null,
-                                    tint = BestCineBranding.PrimaryBlueBright,
-                                    modifier = Modifier.size(36.dp),
-                                )
-                                Spacer(modifier = Modifier.height(8.dp))
-                                Text(
-                                    text = if (castState.isConnecting) {
-                                        castState.statusMessage ?: "Conectando à TV..."
-                                    } else {
-                                        "Transmitindo para ${castState.activeDevice?.friendlyName ?: "TV"}"
-                                    },
-                                    style = MaterialTheme.typography.titleSmall,
-                                    color = Color.White,
-                                    fontWeight = FontWeight.Bold,
-                                    textAlign = TextAlign.Center,
-                                )
-                                Spacer(modifier = Modifier.height(4.dp))
-                                Text(
-                                    text = "Toque aqui para pausar, ajustar volume ou parar",
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = Color(0xFF94A3B8),
-                                    textAlign = TextAlign.Center,
-                                )
-                            }
+                            BestCineCastPlayerLockOverlay(
+                                castState = castState,
+                                fallbackTitle = activeChannel.name,
+                                compact = !isFullscreen,
+                                onOpenControls = { showCastDialog = true },
+                                onBack = if (isFullscreen) onExitFullscreen else null,
+                            )
                         } else if (isSelectedTab && sourceUrl.isNotBlank()) {
                             key("${activeChannel.id}|$sourceUrl") {
                                 PlatformPlayerSurface(

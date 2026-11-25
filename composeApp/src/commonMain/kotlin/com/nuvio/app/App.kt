@@ -1,5 +1,6 @@
 package com.nuvio.app
 
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.Composable
@@ -14,6 +15,7 @@ import coil3.compose.setSingletonImageLoaderFactory
 import coil3.request.CachePolicy
 import coil3.request.crossfade
 import coil3.svg.SvgDecoder
+import com.nuvio.app.bestcine.cast.BestCineGlobalCastMiniBar
 import com.nuvio.app.core.poster.CustomPosterFallbackInterceptor
 import com.nuvio.app.core.ui.NativeProfileSwitcherController
 import com.nuvio.app.core.ui.NuvioTheme
@@ -119,7 +121,10 @@ internal fun AppEnvironment(content: @Composable () -> Unit) {
             desktopUiScale = desktopUiScaleForWindow(maxWidth.value, maxHeight.value),
         ) {
             PlatformKeyboardNavigationHost()
-            content()
+            Box(modifier = Modifier.fillMaxSize()) {
+                content()
+                BestCineGlobalCastMiniBar()
+            }
         }
     }
 }

@@ -43,6 +43,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.nuvio.app.bestcine.cast.BestCineCastController
 import com.nuvio.app.bestcine.cast.BestCineCastDialog
 import com.nuvio.app.bestcine.cast.BestCineCastMedia
+import com.nuvio.app.bestcine.cast.BestCineCastPlayerLockOverlay
 import com.nuvio.app.core.ui.NuvioStatusModal
 import com.nuvio.app.core.ui.LocalFold
 import com.nuvio.app.features.p2p.P2pStreamingState
@@ -631,7 +632,16 @@ internal fun PlayerScreenRuntime.RenderPlayerRuntimeUi(
         }
         val resolvedAutoEngine = resolvedAutoEngineState.value
 
-        if (renderPlayerSurface) {
+        if (isCastBlockingLocalPlayback) {
+            BestCineCastPlayerLockOverlay(
+                castState = castState,
+                fallbackTitle = title,
+                compact = false,
+                onOpenControls = { showCastDialog = true },
+                onBack = { requestBack() },
+                modifier = videoModifier,
+            )
+        } else if (renderPlayerSurface) {
             val surfaceSource = currentPlayerSurfaceSource
             val sourceAvailable = surfaceSource != null
             PlatformPlayerSurface(
@@ -699,7 +709,7 @@ internal fun PlayerScreenRuntime.RenderPlayerRuntimeUi(
         }
 
         AnimatedVisibility(
-            visible = playerSettingsUiState.pauseOverlayEnabled && pausedOverlayVisible && !controlsVisible && !playerControlsLocked && !isInPip && fold == null,
+            visible = !isCastBlockingLocalPlayback && playerSettingsUiState.pauseOverlayEnabled && pausedOverlayVisible && !controlsVisible && !playerControlsLocked && !isInPip && fold == null,
             enter = fadeIn(animationSpec = tween(durationMillis = 220)),
             exit = fadeOut(animationSpec = tween(durationMillis = 180)),
         ) {
@@ -718,7 +728,7 @@ internal fun PlayerScreenRuntime.RenderPlayerRuntimeUi(
             )
         }
 
-        if (!isDesktop) {
+        if (!isDesktop && !isCastBlockingLocalPlayback) {
             RenderPlayerControls(
                 displayedPositionMs = displayedPositionMs,
                 isEpisode = isEpisode,
@@ -726,19 +736,21 @@ internal fun PlayerScreenRuntime.RenderPlayerRuntimeUi(
                 modifier = panelModifier,
             )
         }
-        Box(modifier = videoModifier) {
-            RenderPlaybackOverlays(
-                runtime = runtime,
-                displayedPositionMs = displayedPositionMs,
-                currentGestureFeedback = currentGestureFeedback,
-                p2pInitialLoadingMessage = p2pInitialLoadingMessage,
-                p2pInitialLoadingProgress = p2pInitialLoadingProgress,
-                showP2pRebufferStats = showP2pRebufferStats,
-                p2pRebufferMessage = p2pRebufferMessage,
-                p2pRebufferProgress = p2pRebufferProgress,
-                suppressOpeningOverlay = isDesktop && playerSurfaceSourceUrl != null,
-                folded = fold != null,
-            )
+        if (!isCastBlockingLocalPlayback) {
+            Box(modifier = videoModifier) {
+                RenderPlaybackOverlays(
+                    runtime = runtime,
+                    displayedPositionMs = displayedPositionMs,
+                    currentGestureFeedback = currentGestureFeedback,
+                    p2pInitialLoadingMessage = p2pInitialLoadingMessage,
+                    p2pInitialLoadingProgress = p2pInitialLoadingProgress,
+                    showP2pRebufferStats = showP2pRebufferStats,
+                    p2pRebufferMessage = p2pRebufferMessage,
+                    p2pRebufferProgress = p2pRebufferProgress,
+                    suppressOpeningOverlay = isDesktop && playerSurfaceSourceUrl != null,
+                    folded = fold != null,
+                )
+            }
         }
     }
     Box(modifier = panelModifier) {

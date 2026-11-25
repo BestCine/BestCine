@@ -37,6 +37,20 @@ object BestCineCastController {
     private val _state = MutableStateFlow(BestCineCastState())
     val state: StateFlow<BestCineCastState> = _state.asStateFlow()
 
+    private var activePlayerOverlayCount = 0
+    private val _isPlayerCastOverlayVisible = MutableStateFlow(false)
+    val isPlayerCastOverlayVisible: StateFlow<Boolean> = _isPlayerCastOverlayVisible.asStateFlow()
+
+    internal fun registerPlayerCastOverlay() {
+        activePlayerOverlayCount += 1
+        _isPlayerCastOverlayVisible.value = activePlayerOverlayCount > 0
+    }
+
+    internal fun unregisterPlayerCastOverlay() {
+        activePlayerOverlayCount = (activePlayerOverlayCount - 1).coerceAtLeast(0)
+        _isPlayerCastOverlayVisible.value = activePlayerOverlayCount > 0
+    }
+
     private var scanJob: Job? = null
     private var lastKnownPositionSec: Int = 0
 
