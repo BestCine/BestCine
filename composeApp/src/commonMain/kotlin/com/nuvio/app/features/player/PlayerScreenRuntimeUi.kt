@@ -35,10 +35,14 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.nuvio.app.bestcine.cast.BestCineCastController
+import com.nuvio.app.bestcine.cast.BestCineCastDialog
+import com.nuvio.app.bestcine.cast.BestCineCastMedia
 import com.nuvio.app.core.ui.NuvioStatusModal
 import com.nuvio.app.core.ui.LocalFold
 import com.nuvio.app.features.p2p.P2pStreamingState
@@ -79,6 +83,8 @@ internal fun PlayerScreenRuntime.RenderPlayerRuntimeUi(
         onDispose { systemBackRegistration(null) }
     }
     val isInPip = rememberIsInPictureInPicture()
+    val castState by BestCineCastController.state.collectAsStateWithLifecycle()
+    val castUrl = if (activeTorrentInfoHash != null) p2pResolvedSourceUrl else activeSourceUrl
     val displayedPositionMs = scrubbingPositionMs ?: playbackSnapshot.positionMs
     val seasonNumber = activeSeasonNumber
     val episodeNumber = activeEpisodeNumber
@@ -458,6 +464,9 @@ internal fun PlayerScreenRuntime.RenderPlayerRuntimeUi(
         showSources = activeVideoId != null,
         showEpisodes = isSeries,
         showExternalPlayer = args.onOpenInExternalPlayer != null,
+        showCast = !castUrl.isNullOrBlank(),
+        castActive = castState.isCasting,
+        castLabel = "Transmitir para TV",
         durationMs = playbackSnapshot.durationMs,
         positionMs = displayedPositionMs,
         bufferedPositionMs = playbackSnapshot.bufferedPositionMs.coerceAtLeast(0L),
@@ -771,6 +780,8 @@ private fun PlayerScreenRuntime.RenderPlayerControls(
     val isInPip = rememberIsInPictureInPicture()
     val partyState by PartyRepository.state.collectAsStateWithLifecycle()
     val partyActive = partyState.party != null
+    val castState by BestCineCastController.state.collectAsStateWithLifecycle()
+    val castUrl = if (activeTorrentInfoHash != null) p2pResolvedSourceUrl else activeSourceUrl
     val playerBadges = if (isDesktop) emptyList() else rememberPlayerBadges()
     LaunchedEffect(folded) {
         if (folded) {
@@ -813,6 +824,15 @@ private fun PlayerScreenRuntime.RenderPlayerControls(
                 if (playerControlsLocked) unlockPlayerControls() else lockPlayerControls()
             },
             onBack = { requestBack() },
+            onCastClick = if (!castUrl.isNullOrBlank()) {
+                {
+                    controlsActivityTick += 1
+                    showCastDialog = true
+                }
+            } else {
+                null
+            },
+            castActive = castState.isCasting,
             onPipClick = if (!isIos) {
                 { togglePlayerPictureInPicture() }
             } else {
@@ -1036,6 +1056,10 @@ private fun PlayerScreenRuntime.handlePlayerControlsAction(action: PlayerControl
                 showVideoSettingsModal = true
                 controlsVisible = true
             }
+        }
+        PlayerControlsAction.Cast -> {
+            controlsActivityTick += 1
+            showCastDialog = true
         }
         PlayerControlsAction.PictureInPicture -> {
             togglePlayerPictureInPicture()
@@ -2001,6 +2025,34 @@ private fun BoxScope.RenderPlaybackOverlays(
 
 @Composable
 private fun PlayerScreenRuntime.RenderPlayerModals(displayedPositionMs: Long) {
+    val castUrl = if (activeTorrentInfoHash != null) p2pResolvedSourceUrl else activeSourceUrl
+    val castTitle = buildString {
+        append(title)
+        if (activeSeasonNumber != null && activeEpisodeNumber != null) {
+            append(" • S${activeSeasonNumber}E${activeEpisodeNumber}")
+            if (!activeEpisodeTitle.isNullOrBlank()) {
+                append(" - ${activeEpisodeTitle}")
+            }
+        }
+    }
+    BestCineCastDialog(
+        visible = showCastDialog,
+        media = castUrl?.takeIf { it.isNotBlank() }?.let { url ->
+            BestCineCastMedia(
+                title = castTitle.ifBlank { "BestCine" },
+                url = url,
+                headers = activeSourceHeaders,
+                contentType = activeStreamType?.takeIf { it.isNotBlank() } ?: "video/mp4",
+                isLive = false,
+                startPositionMs = displayedPositionMs,
+            )
+        },
+        onPauseLocalPlayback = {
+            shouldPlay = false
+            playerController?.pause()
+        },
+        onDismiss = { showCastDialog = false },
+    )
     PlayerChaptersPanel(
         visible = showChaptersPanel && chapters.isNotEmpty(),
         chapters = chapters,

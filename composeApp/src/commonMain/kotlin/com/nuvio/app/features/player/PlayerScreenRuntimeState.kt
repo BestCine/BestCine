@@ -292,6 +292,7 @@ internal class PlayerScreenRuntime(
     var showSubtitleModal by mutableStateOf(false)
     var showVideoSettingsModal by mutableStateOf(false)
     var showStreamInfo by mutableStateOf(false)
+    var showCastDialog by mutableStateOf(false)
     var showPartyPanel by mutableStateOf(false)
     var partyPanelToken by mutableStateOf(0L)
     var partyMessage by mutableStateOf("")

@@ -1313,6 +1313,7 @@ private fun String.toPlayerControlsAction(): PlayerControlsAction? =
         "keyboardSeekForward" -> PlayerControlsAction.KeyboardSeekForward
         "keyboardVolumeDown" -> PlayerControlsAction.KeyboardVolumeDown
         "keyboardVolumeUp" -> PlayerControlsAction.KeyboardVolumeUp
+        "cast" -> PlayerControlsAction.Cast
         "pictureInPicture", "pip" -> PlayerControlsAction.PictureInPicture
         "resize" -> PlayerControlsAction.ResizeMode
         "speed" -> PlayerControlsAction.Speed
@@ -1649,6 +1650,12 @@ private fun PlayerControlsState.toControlsJson(isFullscreen: Boolean, onImageRea
         appendJsonField("showEpisodes", showEpisodes)
         append(',')
         appendJsonField("showExternalPlayer", showExternalPlayer)
+        append(',')
+        appendJsonField("showCast", showCast)
+        append(',')
+        appendJsonField("castActive", castActive)
+        append(',')
+        appendJsonField("castLabel", castLabel)
         append(',')
         appendJsonField("durationMs", durationMs)
         append(',')

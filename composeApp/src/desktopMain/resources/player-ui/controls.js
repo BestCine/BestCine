@@ -26,6 +26,7 @@ const toggleLabel = document.getElementById("toggleLabel");
 const nextEpisodeButton = document.getElementById("nextEpisodeButton");
 const nextEpisodeButtonLabel = document.getElementById("nextEpisodeButtonLabel");
 const fullscreenButton = document.getElementById("fullscreenButton");
+const castButton = document.getElementById("castButton");
 const pipButton = document.getElementById("pipButton");
 const fullscreenIcon = document.getElementById("fullscreenIcon");
 const title = document.getElementById("title");
@@ -343,6 +344,9 @@ let state = {
   showSources: false,
   showEpisodes: false,
   showExternalPlayer: false,
+  showCast: false,
+  castActive: false,
+  castLabel: "Transmitir para TV",
   durationMs: 0,
   positionMs: 0,
   bufferedPositionMs: 0,
@@ -2794,6 +2798,14 @@ const renderChrome = () => {
   setActionButtonLabel("audio", state.audioLabel || "Audio");
   setActionButtonLabel("sources", state.sourcesLabel || "Sources");
   setActionButtonLabel("episodes", state.episodesLabel || "Episodes");
+  if (castButton) {
+    const showCast = Boolean(state.showCast);
+    const castLabel = String(state.castLabel || "Transmitir para TV").trim();
+    setAttr(castButton, "aria-label", castLabel);
+    setAttr(castButton, "title", castLabel);
+    castButton.hidden = !showCast;
+    castButton.style.color = state.castActive ? "var(--theme-accent-strong, #4299ff)" : "";
+  }
   if (pipButton) {
     const pipLabel = String(state.pipLabel || "").trim();
     setAttr(pipButton, "aria-label", pipLabel);

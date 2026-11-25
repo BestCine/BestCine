@@ -28,6 +28,8 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Speed
 import androidx.compose.material.icons.filled.SwapHoriz
 import androidx.compose.material.icons.rounded.Build
+import androidx.compose.material.icons.rounded.Cast
+import androidx.compose.material.icons.rounded.CastConnected
 import androidx.compose.material.icons.rounded.Flag
 import androidx.compose.material.icons.rounded.Groups
 import androidx.compose.material.icons.rounded.Forward10
@@ -108,6 +110,8 @@ internal fun PlayerControlsShell(
     showPlaybackControls: Boolean = true,
     onLockToggle: () -> Unit,
     onBack: () -> Unit,
+    onCastClick: (() -> Unit)? = null,
+    castActive: Boolean = false,
     onPipClick: (() -> Unit)? = null,
     onPartyClick: (() -> Unit)? = null,
     partyActive: Boolean = false,
@@ -243,6 +247,8 @@ internal fun PlayerControlsShell(
                     onLockToggle = onLockToggle,
                     onVideoSettingsClick = onVideoSettingsClick,
                     onOpenInExternalPlayer = onOpenInExternalPlayer,
+                    onCastClick = onCastClick,
+                    castActive = castActive,
                     onPipClick = onPipClick,
                     onPartyClick = onPartyClick,
                     partyActive = partyActive,
@@ -263,6 +269,8 @@ internal fun PlayerControlsShell(
                         isLocked = isLocked,
                         onLockToggle = onLockToggle,
                         onBack = onBack,
+                        onCastClick = onCastClick,
+                        castActive = castActive,
                         onPipClick = onPipClick,
                         onPartyClick = onPartyClick,
                         partyActive = partyActive,
@@ -407,6 +415,8 @@ private fun PlayerHeader(
     onLockToggle: () -> Unit,
     onVideoSettingsClick: (() -> Unit)?,
     onOpenInExternalPlayer: (() -> Unit)?,
+    onCastClick: (() -> Unit)?,
+    castActive: Boolean,
     onPipClick: (() -> Unit)?,
     onPartyClick: (() -> Unit)?,
     partyActive: Boolean,
@@ -517,6 +527,16 @@ private fun PlayerHeader(
                             buttonSize = metrics.headerIconSize + 16.dp,
                             iconSize = metrics.headerIconSize,
                             onClick = onOpenInExternalPlayer,
+                        )
+                    }
+                    if (onCastClick != null) {
+                        PlayerHeaderIconButton(
+                            icon = if (castActive) Icons.Rounded.CastConnected else Icons.Rounded.Cast,
+                            contentDescription = "Transmitir para TV",
+                            buttonSize = metrics.headerIconSize + 16.dp,
+                            iconSize = metrics.headerIconSize,
+                            onClick = onCastClick,
+                            tint = if (castActive) MaterialTheme.colorScheme.primary else Color.White,
                         )
                     }
                     if (onPipClick != null) {

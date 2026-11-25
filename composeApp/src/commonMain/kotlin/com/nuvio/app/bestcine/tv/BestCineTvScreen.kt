@@ -51,6 +51,8 @@ import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
+import androidx.compose.material.icons.rounded.Cast
+import androidx.compose.material.icons.rounded.CastConnected
 import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.Fullscreen
 import androidx.compose.material.icons.rounded.FullscreenExit
@@ -104,6 +106,9 @@ import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import coil3.compose.AsyncImage
 import com.nuvio.app.bestcine.BestCineBranding
+import com.nuvio.app.bestcine.cast.BestCineCastController
+import com.nuvio.app.bestcine.cast.BestCineCastDialog
+import com.nuvio.app.bestcine.cast.BestCineCastMedia
 import com.nuvio.app.isDesktop
 import com.nuvio.app.core.ui.NuvioLoadingIndicator
 import com.nuvio.app.core.ui.PlatformBackHandler
@@ -850,6 +855,8 @@ private fun BestCineTvSplitPlayerLayout(
     var playerControlsVisible by remember(activeChannel.id, sourceUrl) { mutableStateOf(true) }
     var controlsActivityTick by remember { mutableStateOf(0) }
     val isInPip = rememberIsInPictureInPicture()
+    val castState by BestCineCastController.state.collectAsStateWithLifecycle()
+    var showCastDialog by remember { mutableStateOf(false) }
 
     if (isSelectedTab && sourceUrl.isNotBlank()) {
         ManagePlayerPictureInPicture(
@@ -920,6 +927,9 @@ private fun BestCineTvSplitPlayerLayout(
         showSources = false,
         showEpisodes = false,
         showExternalPlayer = false,
+        showCast = sourceUrl.isNotBlank(),
+        castActive = castState.isCasting,
+        castLabel = "Transmitir para TV",
         showSubmitIntro = false,
         showVideoSettings = false,
     )
@@ -1222,6 +1232,12 @@ private fun BestCineTvSplitPlayerLayout(
                                             controlsActivityTick += 1
                                             true
                                         }
+                                        PlayerControlsAction.Cast -> {
+                                            showCastDialog = true
+                                            playerControlsVisible = true
+                                            controlsActivityTick += 1
+                                            true
+                                        }
                                         PlayerControlsAction.PictureInPicture -> {
                                             togglePlayerPictureInPicture()
                                             true
@@ -1325,6 +1341,7 @@ private fun BestCineTvSplitPlayerLayout(
                                 isLoading = snapshot.isLoading,
                                 isMuted = isMuted,
                                 isFavorite = activeChannel.id in favoriteChannelIds,
+                                isCasting = castState.isCasting,
                                 controlsVisible = playerControlsVisible,
                                 resizeModeLabel = resizeModeLabel,
                                 activeStreams = activeStreams,
@@ -1387,6 +1404,11 @@ private fun BestCineTvSplitPlayerLayout(
                                 },
                                 onTogglePip = {
                                     togglePlayerPictureInPicture()
+                                },
+                                onCastClick = {
+                                    showCastDialog = true
+                                    playerControlsVisible = true
+                                    controlsActivityTick += 1
                                 },
                                 onExitFullscreen = onExitFullscreen,
                             )
@@ -1538,6 +1560,17 @@ private fun BestCineTvSplitPlayerLayout(
                                                 )
                                             }
                                             IconButton(
+                                                onClick = { showCastDialog = true },
+                                                modifier = Modifier.size(34.dp),
+                                            ) {
+                                                Icon(
+                                                    imageVector = if (castState.isCasting) Icons.Rounded.CastConnected else Icons.Rounded.Cast,
+                                                    contentDescription = "Transmitir para TV",
+                                                    tint = if (castState.isCasting) BestCineBranding.PrimaryBlueBright else tokens.colors.textPrimary,
+                                                    modifier = Modifier.size(19.dp),
+                                                )
+                                            }
+                                            IconButton(
                                                 onClick = { togglePlayerPictureInPicture() },
                                                 modifier = Modifier.size(34.dp),
                                             ) {
@@ -1672,6 +1705,16 @@ private fun BestCineTvSplitPlayerLayout(
                                         }
 
                                         IconButton(
+                                            onClick = { showCastDialog = true },
+                                        ) {
+                                            Icon(
+                                                imageVector = if (castState.isCasting) Icons.Rounded.CastConnected else Icons.Rounded.Cast,
+                                                contentDescription = "Transmitir para TV",
+                                                tint = if (castState.isCasting) BestCineBranding.PrimaryBlueBright else tokens.colors.textPrimary,
+                                            )
+                                        }
+
+                                        IconButton(
                                             onClick = { togglePlayerPictureInPicture() },
                                         ) {
                                             Icon(
@@ -1778,6 +1821,21 @@ private fun BestCineTvSplitPlayerLayout(
             }
         }
     }
+
+    BestCineCastDialog(
+        visible = showCastDialog,
+        media = sourceUrl.takeIf { it.isNotBlank() }?.let { url ->
+            BestCineCastMedia(
+                title = activeChannel.name,
+                url = url,
+                headers = requestHeaders,
+                contentType = currentStream.streamType?.takeIf { it.isNotBlank() } ?: "application/vnd.apple.mpegurl",
+                isLive = true,
+            )
+        },
+        onPauseLocalPlayback = { controller?.pause() },
+        onDismiss = { showCastDialog = false },
+    )
 }
 
 @Composable
@@ -2177,6 +2235,7 @@ private fun BestCineTvMobileFullscreenOverlay(
     isLoading: Boolean,
     isMuted: Boolean,
     isFavorite: Boolean,
+    isCasting: Boolean = false,
     controlsVisible: Boolean,
     resizeModeLabel: String,
     activeStreams: List<StreamItem>,
@@ -2192,6 +2251,7 @@ private fun BestCineTvMobileFullscreenOverlay(
     onCycleResizeMode: () -> Unit,
     onSelectSourceIndex: (Int) -> Unit,
     onTogglePip: () -> Unit,
+    onCastClick: (() -> Unit)? = null,
     onExitFullscreen: () -> Unit,
 ) {
     val safePadding = WindowInsets.safeDrawing.asPaddingValues()
@@ -2440,6 +2500,26 @@ private fun BestCineTvMobileFullscreenOverlay(
                             color = Color.White,
                             fontWeight = FontWeight.Medium,
                         )
+                    }
+
+                    if (onCastClick != null) {
+                        IconButton(
+                            onClick = {
+                                onUserActivity()
+                                onCastClick()
+                            },
+                            modifier = Modifier
+                                .size(38.dp)
+                                .clip(CircleShape)
+                                .background(Color.Black.copy(alpha = 0.50f)),
+                        ) {
+                            Icon(
+                                imageVector = if (isCasting) Icons.Rounded.CastConnected else Icons.Rounded.Cast,
+                                contentDescription = "Transmitir para TV",
+                                tint = if (isCasting) BestCineBranding.PrimaryBlueBright else Color.White,
+                                modifier = Modifier.size(20.dp),
+                            )
+                        }
                     }
 
                     IconButton(

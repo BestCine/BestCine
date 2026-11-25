@@ -19,6 +19,8 @@ import androidx.compose.material.icons.automirrored.rounded.KeyboardArrowRight
 import androidx.compose.material.icons.automirrored.rounded.OpenInNew
 import androidx.compose.material.icons.automirrored.rounded.Toc
 import androidx.compose.material.icons.rounded.Build
+import androidx.compose.material.icons.rounded.Cast
+import androidx.compose.material.icons.rounded.CastConnected
 import androidx.compose.material.icons.rounded.Flag
 import androidx.compose.material.icons.rounded.Groups
 import androidx.compose.material.icons.rounded.Info
@@ -63,6 +65,8 @@ internal fun PlayerToolbar(
     onLockToggle: () -> Unit,
     onBack: () -> Unit,
     modifier: Modifier = Modifier,
+    onCastClick: (() -> Unit)? = null,
+    castActive: Boolean = false,
     onPipClick: (() -> Unit)? = null,
     onPartyClick: (() -> Unit)? = null,
     partyActive: Boolean = false,
@@ -75,6 +79,14 @@ internal fun PlayerToolbar(
                 description = stringResource(Res.string.cd_switch_player_engine),
                 icon = Icons.Rounded.SwapHoriz,
                 onClick = onSwitchEngineClick,
+            )
+        }
+        if (onCastClick != null) {
+            PlayerAction(
+                description = "Transmitir para TV",
+                icon = if (castActive) Icons.Rounded.CastConnected else Icons.Rounded.Cast,
+                onClick = onCastClick,
+                tint = if (castActive) MaterialTheme.colorScheme.primary else Color.White,
             )
         }
         if (onPipClick != null) {
