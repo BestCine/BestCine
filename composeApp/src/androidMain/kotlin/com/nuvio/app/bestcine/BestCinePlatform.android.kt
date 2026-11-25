@@ -3,7 +3,9 @@ package com.nuvio.app.bestcine
 import android.content.Context
 import android.content.Intent
 import android.content.SharedPreferences
+import android.content.pm.PackageManager
 import android.net.Uri
+import android.os.Bundle
 import com.nuvio.app.features.addons.AddonHttpClientProvider
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -112,13 +114,7 @@ internal actual object BestCinePlatformAuth {
         val port = serverSocket.localPort
 
         val authUrl = "$cleanOrigin/auth/app?port=$port&state=${URLEncoder.encode(expectedState, "UTF-8")}"
-        val opened = runCatching {
-            val intent = Intent(Intent.ACTION_VIEW, Uri.parse(authUrl)).apply {
-                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-            }
-            context.startActivity(intent)
-            true
-        }.getOrDefault(false)
+        val opened = openAuthInRealBrowser(context, authUrl)
 
         if (!opened) {
             runCatching { serverSocket.close() }
@@ -251,6 +247,76 @@ internal actual object BestCinePlatformAuth {
         }
 
         BestCineAuthResult.Success(user)
+    }
+
+    private fun openAuthInRealBrowser(context: Context, authUrl: String): Boolean {
+        val uri = Uri.parse(authUrl)
+        val browserPkg = resolveRealBrowserPackage(context)
+        if (!browserPkg.isNullOrBlank()) {
+            // Abre direto no navegador real via Custom Tab (evita que o WebAPK do PWA BestCine
+            // sequestre /auth/app ou /auth/google/callback e trave o login do app nativo).
+            val customTabLaunched = runCatching {
+                val intent = Intent(Intent.ACTION_VIEW, uri).apply {
+                    addCategory(Intent.CATEGORY_BROWSABLE)
+                    setPackage(browserPkg)
+                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                    val extras = Bundle()
+                    extras.putBinder("android.support.customtabs.extra.SESSION", null)
+                    putExtras(extras)
+                    putExtra("android.support.customtabs.extra.TOOLBAR_COLOR", 0xFF0A1020.toInt())
+                    putExtra("android.support.customtabs.extra.TITLE_VISIBILITY", 1)
+                }
+                context.startActivity(intent)
+                true
+            }.getOrDefault(false)
+            if (customTabLaunched) return true
+        }
+        return runCatching {
+            val fallback = Intent(Intent.ACTION_VIEW, uri).apply {
+                addCategory(Intent.CATEGORY_BROWSABLE)
+                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            }
+            context.startActivity(fallback)
+            true
+        }.getOrDefault(false)
+    }
+
+    private fun resolveRealBrowserPackage(context: Context): String? {
+        val pm = context.packageManager
+        val probe = Intent(Intent.ACTION_VIEW, Uri.parse("https://accounts.google.com")).apply {
+            addCategory(Intent.CATEGORY_BROWSABLE)
+        }
+        val defaultPkg = runCatching {
+            pm.resolveActivity(probe, PackageManager.MATCH_DEFAULT_ONLY)?.activityInfo?.packageName
+        }.getOrNull()
+        if (isValidRealBrowserPackage(defaultPkg)) return defaultPkg
+
+        val preferred = listOf(
+            "com.android.chrome",
+            "com.chrome.beta",
+            "com.sec.android.app.sbrowser",
+            "org.mozilla.firefox",
+            "com.microsoft.emmx",
+            "com.brave.browser",
+            "com.opera.browser",
+        )
+        for (pkg in preferred) {
+            val test = Intent(Intent.ACTION_VIEW, Uri.parse("https://accounts.google.com")).apply {
+                addCategory(Intent.CATEGORY_BROWSABLE)
+                setPackage(pkg)
+            }
+            val match = runCatching { pm.resolveActivity(test, 0) }.getOrNull()
+            if (match != null) return pkg
+        }
+        return null
+    }
+
+    private fun isValidRealBrowserPackage(pkg: String?): Boolean {
+        if (pkg.isNullOrBlank()) return false
+        if (pkg == "android") return false
+        if (pkg.startsWith("org.chromium.webapk", ignoreCase = true)) return false
+        if (pkg.contains("bestcine", ignoreCase = true)) return false
+        return true
     }
 
     private fun generateRandomState(): String {
