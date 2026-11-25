@@ -5,6 +5,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
+import com.nuvio.app.core.build.AppFeaturePolicy
 import com.nuvio.app.features.collection.CollectionEditorPage
 import com.nuvio.app.features.collection.CollectionEditorScreen
 import com.nuvio.app.features.collection.CollectionManagementScreen
@@ -13,15 +14,31 @@ import com.nuvio.app.features.collection.FolderDetailRepository
 import com.nuvio.app.features.collection.FolderDetailScreen
 import com.nuvio.app.features.home.HomeCatalogSection
 import com.nuvio.app.features.settings.SettingsScreen
+import com.nuvio.app.navigation.AccountSettingsRoute
+import com.nuvio.app.navigation.AddonsSettingsRoute
 import com.nuvio.app.navigation.AppRoute
 import com.nuvio.app.navigation.CollectionEditorPageRoute
 import com.nuvio.app.navigation.CollectionEditorRoute
 import com.nuvio.app.navigation.CollectionsRoute
+import com.nuvio.app.navigation.ContinueWatchingSettingsRoute
 import com.nuvio.app.navigation.FolderDetailRoute
+import com.nuvio.app.navigation.HomescreenSettingsRoute
+import com.nuvio.app.navigation.LicensesAttributionsSettingsRoute
+import com.nuvio.app.navigation.MetaScreenSettingsRoute
 import com.nuvio.app.navigation.NuvioNavigator
 import com.nuvio.app.navigation.PartyRoute
+import com.nuvio.app.navigation.PluginsSettingsRoute
 import com.nuvio.app.navigation.SettingsPageRoute
+import com.nuvio.app.navigation.SupportersContributorsSettingsRoute
 import nuvio.composeapp.generated.resources.Res
+import nuvio.composeapp.generated.resources.compose_settings_page_account
+import nuvio.composeapp.generated.resources.compose_settings_page_addons
+import nuvio.composeapp.generated.resources.compose_settings_page_continue_watching
+import nuvio.composeapp.generated.resources.compose_settings_page_homescreen
+import nuvio.composeapp.generated.resources.compose_settings_page_licenses_attributions
+import nuvio.composeapp.generated.resources.compose_settings_page_meta_screen
+import nuvio.composeapp.generated.resources.compose_settings_page_plugins
+import nuvio.composeapp.generated.resources.compose_settings_page_supporters_contributors
 import nuvio.composeapp.generated.resources.party_title
 import org.jetbrains.compose.resources.stringResource
 
@@ -46,12 +63,44 @@ internal fun SettingsRootDestination(
 ) {
     val onBack = rememberGuardedPopBackStack(navController, route)
     val watchPartyTitle = stringResource(Res.string.party_title)
+    val homescreenSettingsTitle = stringResource(Res.string.compose_settings_page_homescreen)
+    val metaScreenSettingsTitle = stringResource(Res.string.compose_settings_page_meta_screen)
+    val continueWatchingSettingsTitle = stringResource(Res.string.compose_settings_page_continue_watching)
+    val addonsSettingsTitle = stringResource(Res.string.compose_settings_page_addons)
+    val pluginsSettingsTitle = stringResource(Res.string.compose_settings_page_plugins)
+    val accountSettingsTitle = stringResource(Res.string.compose_settings_page_account)
+    val supportersSettingsTitle = stringResource(Res.string.compose_settings_page_supporters_contributors)
+    val licensesSettingsTitle = stringResource(Res.string.compose_settings_page_licenses_attributions)
     SettingsScreen(
         modifier = Modifier.fillMaxSize(),
         initialPageName = route.pageName,
-        requestedPageName = route.pageName,
+        requestedPageName = null,
         onRequestedPageConsumed = {},
         rootActionsEnabled = false,
+        onNavigatePage = if (useNativeNavigation) {
+            { pageName, title ->
+                navController.navigate(SettingsPageRoute(pageName, title))
+            }
+        } else {
+            null
+        },
+        onExternalBack = onBack,
+        onHomescreenClick = { navController.navigate(HomescreenSettingsRoute(homescreenSettingsTitle)) },
+        onMetaScreenClick = { navController.navigate(MetaScreenSettingsRoute(metaScreenSettingsTitle)) },
+        onContinueWatchingClick = { navController.navigate(ContinueWatchingSettingsRoute(continueWatchingSettingsTitle)) },
+        onAddonsClick = { navController.navigate(AddonsSettingsRoute(addonsSettingsTitle)) },
+        onPluginsClick = {
+            if (AppFeaturePolicy.pluginsEnabled) {
+                navController.navigate(PluginsSettingsRoute(pluginsSettingsTitle))
+            }
+        },
+        onAccountClick = { navController.navigate(AccountSettingsRoute(accountSettingsTitle)) },
+        onSupportersContributorsClick = {
+            if (AppFeaturePolicy.supportersContributorsPageEnabled) {
+                navController.navigate(SupportersContributorsSettingsRoute(supportersSettingsTitle))
+            }
+        },
+        onLicensesAttributionsClick = { navController.navigate(LicensesAttributionsSettingsRoute(licensesSettingsTitle)) },
         onCollectionsClick = {
             navController.navigate(CollectionsRoute(collectionsTitle))
         },
