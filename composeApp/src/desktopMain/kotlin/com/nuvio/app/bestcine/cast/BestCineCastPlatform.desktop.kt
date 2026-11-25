@@ -105,6 +105,10 @@ internal actual fun BestCineCastModalContainer(
 internal actual object BestCineCastPlatform {
     actual val supportsSystemScreenCastShortcut: Boolean = false
 
+    actual val isBatteryOptimizationRestricting: Boolean = false
+
+    actual fun openBatteryOptimizationSettings(): Boolean = false
+
     actual fun openSystemScreenCastSettings(): Boolean = false
 
     actual suspend fun discoverSsdpLocations(timeoutMs: Long): List<String> = withContext(Dispatchers.IO) {
@@ -283,13 +287,23 @@ private class LocalDlnaHttpProxy(
 
     fun start() {
         executor.execute {
-            while (running && !serverSocket.isClosed) {
-                try {
-                    val client = serverSocket.accept()
-                    executor.execute { handleClient(client) }
-                } catch (_: Throwable) {
-                    if (!running) break
+            try {
+                while (running && !serverSocket.isClosed) {
+                    try {
+                        val client = serverSocket.accept()
+                        executor.execute {
+                            try {
+                                handleClient(client)
+                            } catch (_: Throwable) {
+                                // Encerramento limpo quando a TV desconecta ou o cast é parado
+                            }
+                        }
+                    } catch (_: Throwable) {
+                        if (!running) break
+                    }
                 }
+            } catch (_: Throwable) {
+                // Encerramento limpo do loop accept
             }
         }
     }

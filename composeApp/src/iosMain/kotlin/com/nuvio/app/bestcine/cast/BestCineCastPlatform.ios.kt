@@ -70,6 +70,10 @@ internal actual fun BestCineCastModalContainer(
 internal actual object BestCineCastPlatform {
     actual val supportsSystemScreenCastShortcut: Boolean = false
 
+    actual val isBatteryOptimizationRestricting: Boolean = false
+
+    actual fun openBatteryOptimizationSettings(): Boolean = false
+
     actual fun openSystemScreenCastSettings(): Boolean = false
 
     actual suspend fun discoverSsdpLocations(timeoutMs: Long): List<String> = withContext(Dispatchers.IO) {

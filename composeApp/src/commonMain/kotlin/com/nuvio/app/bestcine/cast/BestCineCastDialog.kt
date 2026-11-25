@@ -22,6 +22,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.VolumeDown
 import androidx.compose.material.icons.automirrored.rounded.VolumeUp
+import androidx.compose.material.icons.rounded.BatteryChargingFull
 import androidx.compose.material.icons.rounded.Cast
 import androidx.compose.material.icons.rounded.CastConnected
 import androidx.compose.material.icons.rounded.Close
@@ -772,6 +773,45 @@ fun BestCineCastDialog(
                                             )
                                         }
                                     }
+                                }
+                            }
+                        }
+                    }
+
+                    // Aviso opcional no Android quando a otimização de bateria (ex.: MIUI/Xiaomi) pode cortar a transmissão minimizada
+                    if (BestCineCastController.isBatteryOptimizationRestricting) {
+                        Surface(
+                            onClick = { BestCineCastController.openBatteryOptimizationSettings() },
+                            shape = RoundedCornerShape(14.dp),
+                            color = Color(0xFFF59E0B).copy(alpha = 0.12f),
+                            border = BorderStroke(1.dp, Color(0xFFF59E0B).copy(alpha = 0.35f)),
+                            modifier = Modifier.fillMaxWidth(),
+                        ) {
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(horizontal = 13.dp, vertical = 10.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Rounded.BatteryChargingFull,
+                                    contentDescription = null,
+                                    tint = Color(0xFFFBBF24),
+                                    modifier = Modifier.size(20.dp),
+                                )
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text(
+                                        text = "Não cair ao minimizar o app",
+                                        style = MaterialTheme.typography.labelLarge,
+                                        color = Color(0xFFFEF3C7),
+                                        fontWeight = FontWeight.SemiBold,
+                                    )
+                                    Text(
+                                        text = "Toque aqui e marque \"Sem restrições\" na bateria",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = Color(0xFFFDE68A).copy(alpha = 0.85f),
+                                    )
                                 }
                             }
                         }

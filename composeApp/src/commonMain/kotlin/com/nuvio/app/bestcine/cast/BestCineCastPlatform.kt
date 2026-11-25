@@ -7,6 +7,10 @@ internal expect object BestCineCastPlatform {
 
     fun openSystemScreenCastSettings(): Boolean
 
+    val isBatteryOptimizationRestricting: Boolean
+
+    fun openBatteryOptimizationSettings(): Boolean
+
     suspend fun discoverSsdpLocations(timeoutMs: Long = 2800L): List<String>
 
     fun startLocalStreamProxy(

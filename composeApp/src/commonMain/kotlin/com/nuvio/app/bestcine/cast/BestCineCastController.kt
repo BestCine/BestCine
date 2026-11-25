@@ -63,6 +63,9 @@ object BestCineCastController {
     val supportsSystemScreenCastShortcut: Boolean
         get() = BestCineCastPlatform.supportsSystemScreenCastShortcut
 
+    val isBatteryOptimizationRestricting: Boolean
+        get() = BestCineCastPlatform.isBatteryOptimizationRestricting
+
     internal var pendingCastTitle: String? = null
         private set
     internal var pendingCastDeviceName: String? = null
@@ -70,6 +73,9 @@ object BestCineCastController {
 
     fun openSystemScreenCastSettings(): Boolean =
         BestCineCastPlatform.openSystemScreenCastSettings()
+
+    fun openBatteryOptimizationSettings(): Boolean =
+        BestCineCastPlatform.openBatteryOptimizationSettings()
 
     fun clearError() {
         _state.update { it.copy(errorMessage = null) }
@@ -126,6 +132,12 @@ object BestCineCastController {
                 val isHlsOrLive = media.isLive ||
                     media.url.substringBefore('?').lowercase().endsWith(".m3u8") ||
                     media.contentType.contains("mpegurl", ignoreCase = true)
+
+                // Em TV Ao Vivo, aguarda o player local (ExoPlayer/mpv) fechar a conexão IPTV
+                // antes da TV conectar, evitando conflito de 2 conexões simultâneas ("Arquivo não suportado").
+                if (isHlsOrLive) {
+                    delay(450L)
+                }
 
                 // Sempre tenta proxy local primeiro (resolve DoH, TLS 1.3 para TVs antigas, headers e HLS->TS)
                 pendingCastTitle = media.title.ifBlank { "BestCine" }
