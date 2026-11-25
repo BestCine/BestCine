@@ -1,16 +1,14 @@
 package com.nuvio.app.bestcine.cast
 
-import java.io.ByteArrayOutputStream
-import java.io.OutputStream
-
 /**
- * Ferramentas puras em Kotlin para streams MPEG-TS (188 bytes/pacote) usados no DLNA:
+ * Ferramentas puras em Kotlin Multiplatform (100% compartilhadas entre Android, Windows, macOS,
+ * Linux e iOS/iPadOS) para streams MPEG-TS (188 bytes/pacote) usados no DLNA:
  * 1) [MpegTsNormalizer]: corrige Continuity Counter (CC) e mantém PTS/DTS/PCR monotônicos
  *    através de cortes de comercial (#EXT-X-DISCONTINUITY) e reconexões de servidores IPTV,
  *    impedindo que TVs Samsung/LG encerrem a reprodução após alguns minutos.
- * 2) [MpegTsDualTrackMuxer]: combina segmentos HLS de vídeo-only + áudio separado
+ * 2) [muxVideoAndAudioSegments]: combina segmentos HLS de vídeo-only + áudio separado
  *    (#EXT-X-MEDIA:TYPE=AUDIO, como na Pluto TV) em um único fluxo `video/mp2t` com
- *    PAT/PMT unificados (CRC-32 MPEG-2 válido), devolvendo áudio 100% nativo na Smart TV!
+ *    PAT/PMT unificados (CRC-32 MPEG-2 válido), entregando áudio 100% nativo na Smart TV!
  */
 internal object BestCineMpegTsTools {
     const val PACKET_SIZE = 188
@@ -21,6 +19,28 @@ internal object BestCineMpegTsTools {
     const val DEFAULT_AUDIO_PID = 0x0101
     private const val PTS_MODULO = 1L shl 33 // 8589934592 (90 kHz, ~26.5h)
     private const val PTS_MASK = PTS_MODULO - 1L
+
+    private class GrowableByteBuffer(initialCapacity: Int = 4096) {
+        private var buf = ByteArray(initialCapacity.coerceAtLeast(256))
+        var size: Int = 0
+            private set
+
+        fun write(data: ByteArray, offset: Int = 0, length: Int = data.size) {
+            if (length <= 0) return
+            ensureCapacity(size + length)
+            data.copyInto(buf, destinationOffset = size, startIndex = offset, endIndex = offset + length)
+            size += length
+        }
+
+        fun toByteArray(): ByteArray = buf.copyOf(size)
+
+        private fun ensureCapacity(minCap: Int) {
+            if (minCap <= buf.size) return
+            var newCap = buf.size * 2
+            while (newCap < minCap) newCap *= 2
+            buf = buf.copyOf(newCap)
+        }
+    }
 
     fun mpeg2Crc32(data: ByteArray, offset: Int, length: Int): Int {
         var crc = -1 // 0xFFFFFFFF
@@ -132,9 +152,6 @@ internal object BestCineMpegTsTools {
         val audioStreamType: Int,
     )
 
-    /**
-     * Inspeciona PAT + PMT nos primeiros pacotes de um buffer `.ts` para descobrir PIDs reais.
-     */
     fun inspectTrackInfo(tsData: ByteArray): TrackInfo? {
         val start = findSyncOffset(tsData)
         if (start < 0) return null
@@ -215,10 +232,6 @@ internal object BestCineMpegTsTools {
         return null
     }
 
-    /**
-     * Combina um segmento `.ts` de vídeo + um segmento de áudio separado (`.ts` ou ADTS `.aac`)
-     * em um único buffer `.ts` com PAT + PMT unificados declarando ambos os fluxos!
-     */
     fun muxVideoAndAudioSegments(videoBytes: ByteArray, audioBytes: ByteArray): ByteArray {
         val vStart = findSyncOffset(videoBytes)
         if (vStart < 0) return videoBytes
@@ -232,7 +245,7 @@ internal object BestCineMpegTsTools {
         val aStart = findSyncOffset(audioBytes)
         val audioIsTs = aStart >= 0
 
-        val out = ByteArrayOutputStream(videoBytes.size + audioBytes.size + 2048)
+        val out = GrowableByteBuffer(videoBytes.size + audioBytes.size + 2048)
 
         if (audioIsTs) {
             val aInfo = inspectTrackInfo(audioBytes)
@@ -245,7 +258,6 @@ internal object BestCineMpegTsTools {
                 srcAudioPid
             }
 
-            // Extrai pacotes úteis de vídeo (sem PAT/PMT originais) e de áudio (remapeando PID se preciso)
             val videoPkts = extractElementaryPackets(videoBytes, vStart, skipPids = setOf(PAT_PID, videoPmtPid))
             val audioPkts = extractElementaryPackets(
                 audioBytes,
@@ -257,11 +269,9 @@ internal object BestCineMpegTsTools {
 
             if (audioPkts.isEmpty()) return videoBytes
 
-            // Emite PAT + PMT unificados no início do segmento
             out.write(buildPatPacket(UNIFIED_PMT_PID))
             out.write(buildPmtPacket(UNIFIED_PMT_PID, pcrPid, videoType, videoPid, audioType, dstAudioPid))
 
-            // Intercala pacotes de vídeo e áudio proporcionalmente ao longo do segmento
             val totalV = videoPkts.size
             val totalA = audioPkts.size
             var vi = 0
@@ -275,7 +285,6 @@ internal object BestCineMpegTsTools {
                     out.write(videoPkts[vi++])
                 }
                 emitted += 1
-                // Reemite PAT+PMT periodicamente a cada ~400 pacotes para lock rápido da TV
                 if (emitted % 400 == 0) {
                     out.write(buildPatPacket(UNIFIED_PMT_PID))
                     out.write(buildPmtPacket(UNIFIED_PMT_PID, pcrPid, videoType, videoPid, audioType, dstAudioPid))
@@ -284,7 +293,6 @@ internal object BestCineMpegTsTools {
             return out.toByteArray()
         }
 
-        // Caso o áudio separado venha em ADTS AAC cru (`.aac` começando com 0xFF 0xF*)
         val adtsStart = findAdtsSyncOffset(audioBytes)
         if (adtsStart < 0) return videoBytes
         val dstAudioPid = if (videoPid != DEFAULT_AUDIO_PID) DEFAULT_AUDIO_PID else 0x0102
@@ -352,7 +360,6 @@ internal object BestCineMpegTsTools {
     }
 
     private fun findAdtsSyncOffset(data: ByteArray): Int {
-        // Pula ID3 tag opcional no início de arquivos `.aac` HLS (muito comum na Apple/Pluto!)
         var pos = 0
         if (data.size >= 10 && data[0] == 'I'.code.toByte() && data[1] == 'D'.code.toByte() && data[2] == '3'.code.toByte()) {
             val tagSize = ((data[6].toInt() and 0x7F) shl 21) or
@@ -393,22 +400,20 @@ internal object BestCineMpegTsTools {
                 ((adts[pos + 5].toInt() ushr 5) and 0x07))
             if (frameLen < 7 || pos + frameLen > adts.size) break
 
-            // Monta pacote PES de áudio (14 bytes header + ADTS frame)
             val pesLen = 8 + frameLen
             val pes = ByteArray(14 + frameLen)
             pes[0] = 0x00
             pes[1] = 0x00
             pes[2] = 0x01
-            pes[3] = 0xC0.toByte() // audio stream 0
+            pes[3] = 0xC0.toByte()
             pes[4] = ((pesLen ushr 8) and 0xFF).toByte()
             pes[5] = (pesLen and 0xFF).toByte()
             pes[6] = 0x80.toByte()
-            pes[7] = 0x80.toByte() // PTS present
-            pes[8] = 0x05 // PTS length
+            pes[7] = 0x80.toByte()
+            pes[8] = 0x05
             encodePts(pes, 9, pts, prefix = 0x20)
-            System.arraycopy(adts, pos, pes, 14, frameLen)
+            adts.copyInto(pes, destinationOffset = 14, startIndex = pos, endIndex = pos + frameLen)
 
-            // Fatia o PES em pacotes MPEG-TS de 188 bytes
             var pOff = 0
             var first = true
             while (pOff < pes.size) {
@@ -418,22 +423,21 @@ internal object BestCineMpegTsTools {
                 pkt[2] = (audioPid and 0xFF).toByte()
                 val rem = pes.size - pOff
                 if (rem >= 184) {
-                    pkt[3] = 0x10 // payload only
-                    System.arraycopy(pes, pOff, pkt, 4, 184)
+                    pkt[3] = 0x10
+                    pes.copyInto(pkt, destinationOffset = 4, startIndex = pOff, endIndex = pOff + 184)
                     pOff += 184
                 } else {
                     val pad = 184 - rem
-                    pkt[3] = 0x30 // adaptation + payload
+                    pkt[3] = 0x30
                     pkt[4] = (pad - 1).toByte()
                     if (pad > 1) pkt[5] = 0x00
-                    System.arraycopy(pes, pOff, pkt, 4 + pad, rem)
+                    pes.copyInto(pkt, destinationOffset = 4 + pad, startIndex = pOff, endIndex = pOff + rem)
                     pOff += rem
                 }
                 result.add(pkt)
                 first = false
             }
 
-            // Cada frame AAC tem 1024 samples
             val frameTicks = (1024L * 90_000L) / sampleRate
             pts = (pts + frameTicks) and PTS_MASK
             pos += frameLen
@@ -527,7 +531,7 @@ internal object BestCineMpegTsTools {
     }
 
     /**
-     * Filtro de fluxo MPEG-TS com estado por conexão da TV:
+     * Filtro de fluxo MPEG-TS com estado por conexão da TV (100% KMP — Android, Desktop e iOS):
      * - Suaviza o Continuity Counter de 4 bits por PID;
      * - Mantém PTS/DTS/PCR monotônicos através de `#EXT-X-DISCONTINUITY` e reconexões!
      */
@@ -543,17 +547,24 @@ internal object BestCineMpegTsTools {
             discontinuityPending = true
         }
 
-        fun writeAndNormalize(chunk: ByteArray, length: Int, out: OutputStream) {
-            if (length <= 0) return
+        inline fun normalizeChunk(chunk: ByteArray, length: Int, emit: (ByteArray) -> Unit) {
+            val normalized = normalizeBytes(chunk, length)
+            if (normalized.isNotEmpty()) {
+                emit(normalized)
+            }
+        }
+
+        fun normalizeBytes(chunk: ByteArray, length: Int): ByteArray {
+            if (length <= 0) return ByteArray(0)
             val work = ByteArray(leftoverLen + length)
             if (leftoverLen > 0) {
-                System.arraycopy(leftover, 0, work, 0, leftoverLen)
+                leftover.copyInto(work, destinationOffset = 0, startIndex = 0, endIndex = leftoverLen)
             }
-            System.arraycopy(chunk, 0, work, leftoverLen, length)
+            chunk.copyInto(work, destinationOffset = leftoverLen, startIndex = 0, endIndex = length)
             leftoverLen = 0
 
             var pos = 0
-            val outBuf = ByteArrayOutputStream(work.size)
+            val outBuf = GrowableByteBuffer(work.size)
             while (pos + PACKET_SIZE <= work.size) {
                 if (work[pos] != SYNC_BYTE) {
                     pos += 1
@@ -566,14 +577,11 @@ internal object BestCineMpegTsTools {
 
             val rem = work.size - pos
             if (rem in 1..leftover.size) {
-                System.arraycopy(work, pos, leftover, 0, rem)
+                work.copyInto(leftover, destinationOffset = 0, startIndex = pos, endIndex = pos + rem)
                 leftoverLen = rem
             }
 
-            if (outBuf.size() > 0) {
-                out.write(outBuf.toByteArray())
-                out.flush()
-            }
+            return if (outBuf.size > 0) outBuf.toByteArray() else ByteArray(0)
         }
 
         private fun normalizePacketInPlace(buf: ByteArray, base: Int) {
@@ -584,14 +592,12 @@ internal object BestCineMpegTsTools {
             val hasAdaptation = (afc and 0x02) != 0
             val hasPayload = (afc and 0x01) != 0
 
-            // 1. Mantém Continuity Counter sempre sequencial por PID (evita frames corrompidos na Samsung)
             if (hasPayload) {
                 val nextCc = ((ccByPid[pid] ?: -1) + 1) and 0x0F
                 ccByPid[pid] = nextCc
                 buf[base + 3] = ((buf[base + 3].toInt() and 0xF0) or nextCc).toByte()
             }
 
-            // 2. Ajusta PCR se houver campo de adaptação com PCR flag (0x10)
             if (hasAdaptation) {
                 val adaptLen = buf[base + 4].toInt() and 0xFF
                 if (adaptLen >= 7 && (buf[base + 5].toInt() and 0x10) != 0) {
@@ -601,7 +607,6 @@ internal object BestCineMpegTsTools {
                 }
             }
 
-            // 3. Ajusta PTS e DTS em cabeçalhos PES
             val pusi = (buf[base + 1].toInt() and 0x40) != 0
             if (pusi && hasPayload) {
                 val p = payloadOffset(buf, base)
@@ -636,22 +641,19 @@ internal object BestCineMpegTsTools {
                 return raw90k
             }
             var candidate = (raw90k + ptsOffset) and PTS_MASK
-            // Diferença assinada em 33-bit (-4.29B .. +4.29B)
             var diff = (candidate - lastAdjustedPts) and PTS_MASK
             if (diff >= (PTS_MODULO ushr 1)) diff -= PTS_MODULO
 
-            // Se houve #EXT-X-DISCONTINUITY ou salto brusco (volta > 3s ou avanço > 20s), re-ancora suavemente!
             val jumpBack = diff < -270_000L // -3s
             val jumpForward = diff > 1_800_000L // +20s
             if (discontinuityPending || jumpBack || jumpForward) {
-                val target = (lastAdjustedPts + 3600L) and PTS_MASK // +40ms contínuo
+                val target = (lastAdjustedPts + 3600L) and PTS_MASK
                 ptsOffset = (target - raw90k) and PTS_MASK
                 candidate = target
                 discontinuityPending = false
             }
 
-            // Só avança lastAdjustedPts quando positivo (evita B-frames voltarem a âncora)
-            var fwd = (candidate - lastAdjustedPts) and PTS_MASK
+            val fwd = (candidate - lastAdjustedPts) and PTS_MASK
             if (fwd < (PTS_MODULO ushr 1)) {
                 lastAdjustedPts = candidate
             }

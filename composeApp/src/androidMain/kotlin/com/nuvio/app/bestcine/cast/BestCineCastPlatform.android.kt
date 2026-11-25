@@ -557,7 +557,10 @@ private class AndroidDlnaHttpProxy(
                     }
                     if (read <= 0) break
                     try {
-                        normalizer.writeAndNormalize(buffer, read, out)
+                        normalizer.normalizeChunk(buffer, read) { bytes ->
+                            out.write(bytes)
+                            out.flush()
+                        }
                         streamedBytes += read
                     } catch (_: Throwable) {
                         clientDisconnected = true
@@ -778,7 +781,10 @@ private class AndroidDlnaHttpProxy(
             while (running && off < combined.size) {
                 val len = minOf(step, combined.size - off)
                 val slice = if (off == 0 && len == combined.size) combined else combined.copyOfRange(off, off + len)
-                normalizer.writeAndNormalize(slice, len, out)
+                normalizer.normalizeChunk(slice, len) { bytes ->
+                    out.write(bytes)
+                    out.flush()
+                }
                 off += len
             }
             SegmentStreamResult.OK
@@ -857,7 +863,10 @@ private class AndroidDlnaHttpProxy(
                             headerWritten = true
                         }
                         try {
-                            normalizer.writeAndNormalize(buf, read, out)
+                            normalizer.normalizeChunk(buf, read) { bytes ->
+                                out.write(bytes)
+                                out.flush()
+                            }
                         } catch (_: Throwable) {
                             return@use SegmentStreamResult.CLIENT_DISCONNECTED
                         }

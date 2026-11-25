@@ -348,22 +348,12 @@ private class LocalDlnaHttpProxy(
 
             if (isLiveStream && method == "HEAD") {
                 lastDiagnostic = "HEAD live -> 200 video/mp2t"
-                val headerBlock = buildString {
-                    append("HTTP/1.1 200 OK\r\n")
-                    append("Content-Type: video/mp2t\r\n")
-                    append("Accept-Ranges: none\r\n")
-                    append("Access-Control-Allow-Origin: *\r\n")
-                    append("transferMode.dlna.org: Streaming\r\n")
-                    append("contentFeatures.dlna.org: $dlnaFeatures\r\n")
-                    append("Connection: close\r\n\r\n")
-                }
-                out.write(headerBlock.toByteArray(StandardCharsets.ISO_8859_1))
-                out.flush()
+                writeLiveTsHeaders(out, dlnaFeatures)
                 return
             }
 
             if (isLiveStream) {
-                handleLiveOrHlsStream(out, dlnaFeatures)
+                handleLiveOrHlsAsTsStream(out, dlnaFeatures)
                 return
             }
 
@@ -452,7 +442,7 @@ private class LocalDlnaHttpProxy(
                 finalUrl.substringBefore('?').lowercase().endsWith(".m3u8")
 
             if (isHls) {
-                lastDiagnostic = "GET VOD HLS -> convertendo para video/mp2t"
+                lastDiagnostic = "GET VOD HLS -> video/mp2t"
                 val initialPlaylist = input.bufferedReader(StandardCharsets.UTF_8).readText()
                 streamHlsAsMpegTs(
                     initialText = initialPlaylist,
@@ -493,55 +483,99 @@ private class LocalDlnaHttpProxy(
         }
     }
 
-    private fun handleLiveOrHlsStream(out: OutputStream, dlnaFeatures: String) {
-        val resp = openUpstreamWithRetry(defaultUrl, rangeHeader = null, maxAttempts = 3)
-        if (resp == null) {
-            val errHeader = "HTTP/1.1 502 Bad Gateway\r\nConnection: close\r\n\r\n"
-            out.write(errHeader.toByteArray(StandardCharsets.ISO_8859_1))
-            out.flush()
-            return
-        }
+    /**
+     * Mesma engine validada no Android (Windows, macOS e Linux):
+     * - Canais TS puros: reconexão automática + normalizador PTS/PCR/CC;
+     * - Canais HLS/Pluto TV: muxer vídeo+áudio separado em tempo real + normalizador de comerciais!
+     */
+    private fun handleLiveOrHlsAsTsStream(out: OutputStream, dlnaFeatures: String) {
+        val normalizer = BestCineMpegTsTools.MpegTsNormalizer()
+        var headersSent = false
+        var reconnects = 0
 
-        resp.use { r ->
-            val statusCode = r.code
-            val body = r.body
-            if (body == null || statusCode !in 200..299) {
-                lastDiagnostic = "Live origem retornou HTTP $statusCode"
-                val errHeader = "HTTP/1.1 $statusCode Bad Gateway\r\nConnection: close\r\n\r\n"
-                out.write(errHeader.toByteArray(StandardCharsets.ISO_8859_1))
-                out.flush()
-                return
-            }
-
-            val finalUrl = r.request.url.toString()
-            val upstreamMime = r.header("Content-Type")?.lowercase().orEmpty()
-            val input = BufferedInputStream(body.byteStream(), 64 * 1024)
-            input.mark(8192)
-            val probeBuf = ByteArray(256)
-            val probeRead = input.read(probeBuf).coerceAtLeast(0)
-            input.reset()
-
-            val probeText = if (probeRead > 0) String(probeBuf, 0, probeRead, StandardCharsets.UTF_8).trimStart() else ""
-            val isHlsPlaylist = probeText.startsWith("#EXTM3U") ||
-                upstreamMime.contains("mpegurl") ||
-                finalUrl.substringBefore('?').lowercase().endsWith(".m3u8")
-
-            lastDiagnostic = if (isHlsPlaylist) "Live HLS -> video/mp2t" else "Live TS -> video/mp2t"
-
-            if (!isHlsPlaylist) {
-                writeLiveTsHeaders(out, dlnaFeatures)
-                val buffer = ByteArray(16 * 1024)
-                while (running) {
-                    val read = input.read(buffer)
-                    if (read <= 0) break
-                    out.write(buffer, 0, read)
+        while (running && reconnects < 12) {
+            val resp = openUpstreamWithRetry(defaultUrl, rangeHeader = null, maxAttempts = 3)
+            if (resp == null) {
+                if (!headersSent) {
+                    out.write("HTTP/1.1 502 Bad Gateway\r\nConnection: close\r\n\r\n".toByteArray(StandardCharsets.ISO_8859_1))
                     out.flush()
+                    return
                 }
-                return
+                reconnects += 1
+                if (!safeSleep(500L)) return
+                continue
             }
 
-            val initialPlaylist = input.bufferedReader(StandardCharsets.UTF_8).readText()
-            streamHlsAsMpegTs(initialPlaylist, finalUrl, out, dlnaFeatures)
+            var clientDisconnected = false
+            resp.use { r ->
+                val statusCode = r.code
+                val body = r.body
+                if (body == null || statusCode !in 200..299) {
+                    lastDiagnostic = "Live origem retornou HTTP $statusCode"
+                    if (!headersSent) {
+                        out.write("HTTP/1.1 $statusCode Bad Gateway\r\nConnection: close\r\n\r\n".toByteArray(StandardCharsets.ISO_8859_1))
+                        out.flush()
+                        return
+                    }
+                    return@use
+                }
+
+                val finalUrl = r.request.url.toString()
+                val upstreamMime = r.header("Content-Type")?.lowercase().orEmpty()
+                val input = BufferedInputStream(body.byteStream(), 64 * 1024)
+                input.mark(8192)
+                val probeBuf = ByteArray(256)
+                val probeRead = input.read(probeBuf).coerceAtLeast(0)
+                input.reset()
+
+                val probeText = if (probeRead > 0) String(probeBuf, 0, probeRead, StandardCharsets.UTF_8).trimStart() else ""
+                val isHlsPlaylist = probeText.startsWith("#EXTM3U") ||
+                    upstreamMime.contains("mpegurl") ||
+                    finalUrl.substringBefore('?').lowercase().endsWith(".m3u8")
+
+                if (isHlsPlaylist) {
+                    lastDiagnostic = "Live HLS -> video/mp2t (muxed+normalizado)"
+                    val initialPlaylist = input.bufferedReader(StandardCharsets.UTF_8).readText()
+                    streamHlsAsMpegTs(initialPlaylist, finalUrl, out, dlnaFeatures)
+                    return
+                }
+
+                lastDiagnostic = "Live TS -> video/mp2t"
+                if (!headersSent) {
+                    writeLiveTsHeaders(out, dlnaFeatures)
+                    headersSent = true
+                } else {
+                    normalizer.markDiscontinuity()
+                }
+
+                val buffer = ByteArray(16 * 1024)
+                var streamedBytes = 0L
+                while (running) {
+                    val read = try {
+                        input.read(buffer)
+                    } catch (_: Throwable) {
+                        -1
+                    }
+                    if (read <= 0) break
+                    try {
+                        normalizer.normalizeChunk(buffer, read) { bytes ->
+                            out.write(bytes)
+                            out.flush()
+                        }
+                        streamedBytes += read
+                    } catch (_: Throwable) {
+                        clientDisconnected = true
+                        break
+                    }
+                }
+                if (streamedBytes > 256 * 1024L) {
+                    reconnects = 0
+                }
+            }
+
+            if (clientDisconnected) return
+            reconnects += 1
+            if (!safeSleep(450L)) return
         }
     }
 
@@ -559,29 +593,37 @@ private class LocalDlnaHttpProxy(
         out.flush()
     }
 
+    private data class SelectedVariant(
+        val videoPlaylistUrl: String,
+        val externalAudioPlaylistUrl: String?,
+    )
+
     private fun streamHlsAsMpegTs(
         initialText: String,
         initialUrl: String,
         out: OutputStream,
         dlnaFeatures: String,
     ) {
-        var mediaUrl = initialUrl
-        var playlistText = initialText
+        var videoMediaUrl = initialUrl
+        var audioMediaUrl: String? = null
+        var videoPlaylistText = initialText
 
-        if (playlistText.contains("#EXT-X-STREAM-INF")) {
-            val bestVariant = pickBestHlsVariant(playlistText, mediaUrl) ?: run {
+        if (videoPlaylistText.contains("#EXT-X-STREAM-INF")) {
+            val selected = pickBestVariantWithAudio(videoPlaylistText, videoMediaUrl) ?: run {
                 out.write("HTTP/1.1 502 Bad Gateway\r\nConnection: close\r\n\r\n".toByteArray(StandardCharsets.ISO_8859_1))
                 out.flush()
                 return
             }
-            mediaUrl = bestVariant
-            playlistText = fetchTextWithRetry(mediaUrl, attempts = 3) ?: run {
+            videoMediaUrl = selected.videoPlaylistUrl
+            audioMediaUrl = selected.externalAudioPlaylistUrl
+            videoPlaylistText = fetchTextWithRetry(videoMediaUrl, attempts = 3) ?: run {
                 out.write("HTTP/1.1 502 Bad Gateway\r\nConnection: close\r\n\r\n".toByteArray(StandardCharsets.ISO_8859_1))
                 out.flush()
                 return
             }
         }
 
+        val normalizer = BestCineMpegTsTools.MpegTsNormalizer()
         val sentSegments = LinkedHashSet<String>()
         val keyCache = HashMap<String, ByteArray>()
         var isFirstPoll = true
@@ -589,22 +631,37 @@ private class LocalDlnaHttpProxy(
         var consecutiveErrors = 0
 
         while (running) {
-            val parsed = parseHlsMediaPlaylist(playlistText, mediaUrl)
-            val segments = parsed.segments
+            val pollStartMs = System.currentTimeMillis()
+            val parsedVideo = parseHlsMediaPlaylist(videoPlaylistText, videoMediaUrl)
+            val segments = parsedVideo.segments
+
             if (segments.isEmpty()) {
                 consecutiveErrors += 1
-                if (consecutiveErrors >= 8) break
-                if (!safeSleep(1000L)) return
-                val refreshed = refreshMediaPlaylist(mediaUrl)
+                if (consecutiveErrors >= 10) break
+                if (!safeSleep(800L)) return
+                val refreshed = refreshVideoAndAudioUrls(videoMediaUrl, audioMediaUrl)
                 if (refreshed != null) {
-                    mediaUrl = refreshed.first
-                    playlistText = refreshed.second
+                    videoMediaUrl = refreshed.first
+                    audioMediaUrl = refreshed.second
+                    videoPlaylistText = refreshed.third
                 }
                 continue
             }
             consecutiveErrors = 0
 
-            val toStream = if (isFirstPoll && !parsed.isVod && segments.size > 3) {
+            val audioBySeq: Map<Long, HlsSegment> = if (audioMediaUrl != null) {
+                val aText = fetchTextWithRetry(audioMediaUrl, attempts = 2)
+                if (aText != null) {
+                    val parsedAudio = parseHlsMediaPlaylist(aText, audioMediaUrl)
+                    parsedAudio.segments.associateBy { it.sequence }
+                } else {
+                    emptyMap()
+                }
+            } else {
+                emptyMap()
+            }
+
+            val toStream = if (isFirstPoll && !parsedVideo.isVod && segments.size > 3) {
                 segments.dropLast(2).forEach { sentSegments.add(it.url) }
                 segments.takeLast(2)
             } else {
@@ -614,20 +671,42 @@ private class LocalDlnaHttpProxy(
 
             for (seg in toStream) {
                 if (!running) return
-                val streamed = streamSegmentChunked(
-                    seg = seg,
-                    keyCache = keyCache,
-                    out = out,
-                    sendHeadersFirst = !headersSent,
-                    dlnaFeatures = dlnaFeatures,
-                )
-                if (streamed == SegmentStreamResult.CLIENT_DISCONNECTED) {
-                    return
+                if (seg.precededByDiscontinuity) {
+                    normalizer.markDiscontinuity()
                 }
+
+                val matchingAudioSeg = if (audioMediaUrl != null) {
+                    audioBySeq[seg.sequence] ?: audioBySeq.values.firstOrNull()
+                } else {
+                    null
+                }
+
+                val streamed = if (matchingAudioSeg != null) {
+                    streamMuxedDualSegment(
+                        videoSeg = seg,
+                        audioSeg = matchingAudioSeg,
+                        keyCache = keyCache,
+                        normalizer = normalizer,
+                        out = out,
+                        sendHeadersFirst = !headersSent,
+                        dlnaFeatures = dlnaFeatures,
+                    )
+                } else {
+                    streamSingleSegmentChunked(
+                        seg = seg,
+                        keyCache = keyCache,
+                        normalizer = normalizer,
+                        out = out,
+                        sendHeadersFirst = !headersSent,
+                        dlnaFeatures = dlnaFeatures,
+                    )
+                }
+
+                if (streamed == SegmentStreamResult.CLIENT_DISCONNECTED) return
                 if (streamed == SegmentStreamResult.OK) {
                     headersSent = true
                     sentSegments.add(seg.url)
-                    if (sentSegments.size > 96) {
+                    if (sentSegments.size > 128) {
                         val it = sentSegments.iterator()
                         if (it.hasNext()) {
                             it.next()
@@ -637,23 +716,26 @@ private class LocalDlnaHttpProxy(
                 }
             }
 
-            if (parsed.isVod) break
+            if (parsedVideo.isVod) break
 
-            val waitMs = ((parsed.targetDurationSec.coerceIn(2, 6)) * 450L)
+            val targetPollMs = (parsedVideo.targetDurationSec.coerceIn(2, 6)) * 550L
+            val elapsedMs = System.currentTimeMillis() - pollStartMs
+            val waitMs = (targetPollMs - elapsedMs).coerceAtLeast(350L)
             if (!safeSleep(waitMs)) return
 
-            var nextPlaylist: Pair<String, String>? = null
+            var refreshed: Triple<String, String?, String>? = null
             var pollTry = 0
-            while (running && pollTry < 6 && nextPlaylist == null) {
-                nextPlaylist = refreshMediaPlaylist(mediaUrl)
-                if (nextPlaylist == null) {
+            while (running && pollTry < 8 && refreshed == null) {
+                refreshed = refreshVideoAndAudioUrls(videoMediaUrl, audioMediaUrl)
+                if (refreshed == null) {
                     pollTry += 1
-                    if (!safeSleep(750L)) return
+                    if (!safeSleep(650L)) return
                 }
             }
-            if (nextPlaylist == null) break
-            mediaUrl = nextPlaylist.first
-            playlistText = nextPlaylist.second
+            if (refreshed == null) break
+            videoMediaUrl = refreshed.first
+            audioMediaUrl = refreshed.second
+            videoPlaylistText = refreshed.third
         }
     }
 
@@ -669,9 +751,79 @@ private class LocalDlnaHttpProxy(
 
     private enum class SegmentStreamResult { OK, UPSTREAM_FAILED, CLIENT_DISCONNECTED }
 
-    private fun streamSegmentChunked(
+    private fun streamMuxedDualSegment(
+        videoSeg: HlsSegment,
+        audioSeg: HlsSegment,
+        keyCache: HashMap<String, ByteArray>,
+        normalizer: BestCineMpegTsTools.MpegTsNormalizer,
+        out: OutputStream,
+        sendHeadersFirst: Boolean,
+        dlnaFeatures: String,
+    ): SegmentStreamResult {
+        val videoFuture = executor.submit<ByteArray?> { fetchSegmentDecryptedBytes(videoSeg, keyCache) }
+        val audioBytes = fetchSegmentDecryptedBytes(audioSeg, keyCache)
+        val videoBytes = runCatching { videoFuture.get(15, TimeUnit.SECONDS) }.getOrNull()
+            ?: return SegmentStreamResult.UPSTREAM_FAILED
+
+        val combined = if (audioBytes != null && audioBytes.isNotEmpty()) {
+            BestCineMpegTsTools.muxVideoAndAudioSegments(videoBytes, audioBytes)
+        } else {
+            videoBytes
+        }
+
+        return try {
+            if (sendHeadersFirst) {
+                writeLiveTsHeaders(out, dlnaFeatures)
+            }
+            var off = 0
+            val step = 16 * 1024
+            while (running && off < combined.size) {
+                val len = minOf(step, combined.size - off)
+                val slice = if (off == 0 && len == combined.size) combined else combined.copyOfRange(off, off + len)
+                normalizer.normalizeChunk(slice, len) { bytes ->
+                    out.write(bytes)
+                    out.flush()
+                }
+                off += len
+            }
+            SegmentStreamResult.OK
+        } catch (_: Throwable) {
+            SegmentStreamResult.CLIENT_DISCONNECTED
+        }
+    }
+
+    private fun fetchSegmentDecryptedBytes(
         seg: HlsSegment,
         keyCache: HashMap<String, ByteArray>,
+    ): ByteArray? {
+        val resp = openUpstreamWithRetry(seg.url, rangeHeader = null, maxAttempts = 2) ?: return null
+        return resp.use { r ->
+            val body = r.body
+            if (!r.isSuccessful || body == null) return@use null
+            val raw = body.bytes()
+            if (seg.keyUri != null) {
+                val keyBytes = keyCache.getOrPut(seg.keyUri) {
+                    fetchBytes(seg.keyUri) ?: ByteArray(0)
+                }
+                if (keyBytes.size == 16) {
+                    runCatching {
+                        val cipher = Cipher.getInstance("AES/CBC/PKCS5Padding")
+                        cipher.init(Cipher.DECRYPT_MODE, SecretKeySpec(keyBytes, "AES"), IvParameterSpec(seg.iv))
+                        cipher.doFinal(raw)
+                    }.getOrDefault(raw)
+                } else {
+                    raw
+                }
+            } else {
+                raw
+            }
+        }
+    }
+
+    private fun streamSingleSegmentChunked(
+        seg: HlsSegment,
+        keyCache: HashMap<String, ByteArray>,
+        normalizer: BestCineMpegTsTools.MpegTsNormalizer,
         out: OutputStream,
         sendHeadersFirst: Boolean,
         dlnaFeatures: String,
@@ -710,8 +862,10 @@ private class LocalDlnaHttpProxy(
                             headerWritten = true
                         }
                         try {
-                            out.write(buf, 0, read)
-                            out.flush()
+                            normalizer.normalizeChunk(buf, read) { bytes ->
+                                out.write(bytes)
+                                out.flush()
+                            }
                         } catch (_: Throwable) {
                             return@use SegmentStreamResult.CLIENT_DISCONNECTED
                         }
@@ -724,9 +878,12 @@ private class LocalDlnaHttpProxy(
         }
     }
 
-    private fun refreshMediaPlaylist(currentMediaUrl: String): Pair<String, String>? {
-        fetchText(currentMediaUrl)?.let { text ->
-            if (text.contains("#EXTM3U")) return currentMediaUrl to text
+    private fun refreshVideoAndAudioUrls(
+        currentVideoUrl: String,
+        currentAudioUrl: String?,
+    ): Triple<String, String?, String>? {
+        fetchText(currentVideoUrl)?.let { text ->
+            if (text.contains("#EXTM3U")) return Triple(currentVideoUrl, currentAudioUrl, text)
         }
         val resp = runCatching { openUpstream(defaultUrl, rangeHeader = null) }.getOrNull() ?: return null
         return resp.use { r ->
@@ -735,11 +892,11 @@ private class LocalDlnaHttpProxy(
             val text = r.body?.string() ?: return@use null
             if (!text.contains("#EXTM3U")) return@use null
             if (text.contains("#EXT-X-STREAM-INF")) {
-                val variant = pickBestHlsVariant(text, resolvedUrl) ?: return@use null
-                val variantText = fetchText(variant) ?: return@use null
-                variant to variantText
+                val selected = pickBestVariantWithAudio(text, resolvedUrl) ?: return@use null
+                val variantText = fetchText(selected.videoPlaylistUrl) ?: return@use null
+                Triple(selected.videoPlaylistUrl, selected.externalAudioPlaylistUrl, variantText)
             } else {
-                resolvedUrl to text
+                Triple(resolvedUrl, null, text)
             }
         }
     }
@@ -785,7 +942,7 @@ private class LocalDlnaHttpProxy(
     private fun fetchTextWithRetry(url: String, attempts: Int): String? {
         repeat(attempts) { idx ->
             fetchText(url)?.let { return it }
-            if (idx + 1 < attempts && !safeSleep(400L)) return null
+            if (idx + 1 < attempts && !safeSleep(350L)) return null
         }
         return null
     }
@@ -818,28 +975,73 @@ private class LocalDlnaHttpProxy(
         return slash.toLongOrNull()
     }
 
-    private data class HlsSegment(val url: String, val keyUri: String?, val iv: ByteArray)
-    private data class HlsPlaylist(val segments: List<HlsSegment>, val targetDurationSec: Int, val isVod: Boolean)
+    private data class HlsSegment(
+        val url: String,
+        val sequence: Long,
+        val keyUri: String?,
+        val iv: ByteArray,
+        val precededByDiscontinuity: Boolean,
+    )
 
-    private fun pickBestHlsVariant(masterText: String, baseUrl: String): String? {
+    private data class HlsPlaylist(
+        val segments: List<HlsSegment>,
+        val targetDurationSec: Int,
+        val isVod: Boolean,
+    )
+
+    private fun pickBestVariantWithAudio(masterText: String, baseUrl: String): SelectedVariant? {
         val base = URL(baseUrl)
         val lines = masterText.lines().map { it.trim() }.filter { it.isNotEmpty() }
-        var bestUrl: String? = null
-        var bestBandwidth = -1L
+
+        val audioGroupBest = HashMap<String, Pair<Int, String>>()
+        for (line in lines) {
+            if (line.startsWith("#EXT-X-MEDIA:") &&
+                line.contains("TYPE=AUDIO", ignoreCase = true) &&
+                line.contains("URI=\"", ignoreCase = true)
+            ) {
+                val groupId = Regex("""GROUP-ID="([^"]+)"""").find(line)?.groupValues?.getOrNull(1) ?: continue
+                val uriRel = Regex("""URI="([^"]+)"""").find(line)?.groupValues?.getOrNull(1) ?: continue
+                val resolved = runCatching { URL(base, uriRel).toString() }.getOrNull() ?: continue
+                var score = 0
+                if (line.contains("LANGUAGE=\"pt", ignoreCase = true) || line.contains("LANGUAGE=\"por", ignoreCase = true)) score += 20
+                if (line.contains("DEFAULT=YES", ignoreCase = true)) score += 10
+                if (line.contains("AUTOSELECT=YES", ignoreCase = true)) score += 5
+                val prev = audioGroupBest[groupId]
+                if (prev == null || score > prev.first) {
+                    audioGroupBest[groupId] = score to resolved
+                }
+            }
+        }
+
+        var bestMuxed: Pair<Long, String>? = null
+        var bestSplit: Pair<Long, SelectedVariant>? = null
+
         var i = 0
         while (i < lines.size) {
             val line = lines[i]
             if (line.startsWith("#EXT-X-STREAM-INF")) {
                 val bw = Regex("""BANDWIDTH=(\d+)""").find(line)?.groupValues?.getOrNull(1)?.toLongOrNull() ?: 0L
+                val audioGroup = Regex("""AUDIO="([^"]+)"""").find(line)?.groupValues?.getOrNull(1)
+                val externalAudioUrl = audioGroup?.let { audioGroupBest[it]?.second }
                 val nextUri = lines.drop(i + 1).firstOrNull { !it.startsWith("#") }
-                if (nextUri != null && bw >= bestBandwidth) {
-                    bestBandwidth = bw
-                    bestUrl = runCatching { URL(base, nextUri).toString() }.getOrNull()
+                val resolved = nextUri?.let { runCatching { URL(base, it).toString() }.getOrNull() }
+                if (resolved != null) {
+                    if (externalAudioUrl == null) {
+                        if (bestMuxed == null || bw >= bestMuxed.first) {
+                            bestMuxed = bw to resolved
+                        }
+                    } else {
+                        val candidate = SelectedVariant(resolved, externalAudioUrl)
+                        if (bestSplit == null || bw >= bestSplit.first) {
+                            bestSplit = bw to candidate
+                        }
+                    }
                 }
             }
             i += 1
         }
-        return bestUrl
+
+        return bestMuxed?.let { SelectedVariant(it.second, null) } ?: bestSplit?.second
     }
 
     private fun parseHlsMediaPlaylist(text: String, baseUrl: String): HlsPlaylist {
@@ -850,6 +1052,7 @@ private class LocalDlnaHttpProxy(
         var isVod = false
         var currentKeyUri: String? = null
         var currentKeyIv: ByteArray? = null
+        var nextDiscontinuity = false
 
         for (raw in text.lineSequence()) {
             val line = raw.trim()
@@ -860,6 +1063,9 @@ private class LocalDlnaHttpProxy(
                 }
                 line.startsWith("#EXT-X-MEDIA-SEQUENCE:") -> {
                     mediaSeq = line.substringAfter(':').trim().toLongOrNull() ?: 0L
+                }
+                line.startsWith("#EXT-X-DISCONTINUITY") && !line.startsWith("#EXT-X-DISCONTINUITY-SEQUENCE") -> {
+                    nextDiscontinuity = true
                 }
                 line.startsWith("#EXT-X-ENDLIST") -> {
                     isVod = true
@@ -879,7 +1085,16 @@ private class LocalDlnaHttpProxy(
                     val segUrl = runCatching { URL(base, line).toString() }.getOrNull() ?: continue
                     val seq = mediaSeq + segments.size
                     val iv = currentKeyIv ?: sequenceToIv16(seq)
-                    segments.add(HlsSegment(segUrl, currentKeyUri, iv))
+                    segments.add(
+                        HlsSegment(
+                            url = segUrl,
+                            sequence = seq,
+                            keyUri = currentKeyUri,
+                            iv = iv,
+                            precededByDiscontinuity = nextDiscontinuity,
+                        ),
+                    )
+                    nextDiscontinuity = false
                 }
             }
         }
