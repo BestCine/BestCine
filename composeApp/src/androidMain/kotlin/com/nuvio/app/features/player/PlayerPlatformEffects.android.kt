@@ -29,17 +29,47 @@ import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
 import kotlin.math.roundToInt
 
+private var activePlayerOrientationLocks = 0
+private var baseOrientationBeforePlayerLock: Int = ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
+
 @Composable
 actual fun LockPlayerToLandscape() {
     val activity = LocalContext.current.findActivity() ?: return
     if (!activity.shouldForceLandscapePlayer()) return
 
     DisposableEffect(activity) {
-        val previousOrientation = activity.requestedOrientation
+        if (activePlayerOrientationLocks == 0) {
+            baseOrientationBeforePlayerLock = activity.requestedOrientation
+        }
+        activePlayerOrientationLocks += 1
         activity.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
 
         onDispose {
-            activity.requestedOrientation = previousOrientation
+            activePlayerOrientationLocks = (activePlayerOrientationLocks - 1).coerceAtLeast(0)
+            if (activePlayerOrientationLocks == 0) {
+                activity.requestedOrientation = baseOrientationBeforePlayerLock
+            }
+        }
+    }
+}
+
+@Composable
+actual fun LockPlayerToPortrait() {
+    val activity = LocalContext.current.findActivity() ?: return
+    if (!activity.shouldForceLandscapePlayer()) return
+
+    DisposableEffect(activity) {
+        if (activePlayerOrientationLocks == 0) {
+            baseOrientationBeforePlayerLock = activity.requestedOrientation
+        }
+        activePlayerOrientationLocks += 1
+        activity.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
+
+        onDispose {
+            activePlayerOrientationLocks = (activePlayerOrientationLocks - 1).coerceAtLeast(0)
+            if (activePlayerOrientationLocks == 0) {
+                activity.requestedOrientation = baseOrientationBeforePlayerLock
+            }
         }
     }
 }

@@ -17,6 +17,13 @@ internal fun LazyListScope.settingsRootContent(
     showNotificationsEntry: Boolean = true,
     category: SettingsCategory? = null,
 ) {
+    if (!isTablet && category == null) {
+        item(key = "bestcine_catalogs_featured_card") {
+            BestCineCatalogsFeaturedRootCard(
+                onClick = { onPageClick(SettingsPage.BestCineCatalogs) },
+            )
+        }
+    }
     SettingsCategory.entries.filter { category == null || it == category }.forEach { group ->
         item(key = group.name) {
             SettingsGroup(isTablet = isTablet) {

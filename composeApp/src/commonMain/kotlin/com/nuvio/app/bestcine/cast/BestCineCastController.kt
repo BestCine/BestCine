@@ -1,6 +1,7 @@
 package com.nuvio.app.bestcine.cast
 
 import co.touchlab.kermit.Logger
+import com.nuvio.app.bestcine.bestCineCurrentTimeMillis
 import com.nuvio.app.core.network.createApiHttpClient
 import io.ktor.client.request.get
 import io.ktor.client.request.header
@@ -41,6 +42,10 @@ object BestCineCastController {
     private val _isPlayerCastOverlayVisible = MutableStateFlow(false)
     val isPlayerCastOverlayVisible: StateFlow<Boolean> = _isPlayerCastOverlayVisible.asStateFlow()
 
+    private var activeCastDialogCount = 0
+    private val _isCastDialogOpen = MutableStateFlow(false)
+    val isCastDialogOpen: StateFlow<Boolean> = _isCastDialogOpen.asStateFlow()
+
     internal fun registerPlayerCastOverlay() {
         activePlayerOverlayCount += 1
         _isPlayerCastOverlayVisible.value = activePlayerOverlayCount > 0
@@ -51,8 +56,25 @@ object BestCineCastController {
         _isPlayerCastOverlayVisible.value = activePlayerOverlayCount > 0
     }
 
+    internal fun registerCastDialogOpen() {
+        activeCastDialogCount += 1
+        _isCastDialogOpen.value = activeCastDialogCount > 0
+    }
+
+    internal fun unregisterCastDialogOpen() {
+        activeCastDialogCount = (activeCastDialogCount - 1).coerceAtLeast(0)
+        _isCastDialogOpen.value = activeCastDialogCount > 0
+    }
+
     private var scanJob: Job? = null
+    private var positionPollJob: Job? = null
     private var lastKnownPositionSec: Int = 0
+    private var lastSeekTimestampMs: Long = 0L
+
+    private data class TvPositionInfo(
+        val positionSec: Int,
+        val durationSec: Int,
+    )
 
     private data class SoapResult(
         val ok: Boolean,
@@ -299,6 +321,7 @@ object BestCineCastController {
                 }
 
                 lastKnownPositionSec = (media.startPositionMs / 1000L).toInt().coerceAtLeast(0)
+                val initialDurationSec = (media.durationMs / 1000L).toInt().coerceAtLeast(0)
                 if (!media.isLive && lastKnownPositionSec >= 5) {
                     delay(1200L)
                     runCatching {
@@ -315,6 +338,11 @@ object BestCineCastController {
                 }
 
                 val currentVol = device.renderingControlUrl?.let { fetchCurrentVolume(it) } ?: 50
+                val initialTvPos = if (!media.isLive) {
+                    fetchPositionInfo(device.avTransportControlUrl)
+                } else null
+                val resolvedDurationSec = initialTvPos?.durationSec?.takeIf { it > 0 } ?: initialDurationSec
+                val resolvedPositionSec = initialTvPos?.positionSec?.takeIf { it > 0 } ?: lastKnownPositionSec
                 _state.update {
                     it.copy(
                         activeDevice = device,
@@ -322,12 +350,22 @@ object BestCineCastController {
                         isConnecting = false,
                         isPlayingOnTv = true,
                         volumePercent = currentVol,
+                        positionSec = resolvedPositionSec,
+                        durationSec = resolvedDurationSec,
                         statusMessage = "Transmitindo para ${device.friendlyName}",
                         errorMessage = null,
                     )
                 }
+                if (!media.isLive) {
+                    startPositionPolling(device, initialDurationSec)
+                } else {
+                    positionPollJob?.cancel()
+                    positionPollJob = null
+                }
             }.onFailure { error ->
                 log.w(error) { "Erro ao transmitir para ${device.friendlyName}" }
+                positionPollJob?.cancel()
+                positionPollJob = null
                 BestCineCastPlatform.stopLocalStreamProxy()
                 _state.update {
                     it.copy(
@@ -335,6 +373,8 @@ object BestCineCastController {
                         activeDevice = null,
                         activeMedia = null,
                         isPlayingOnTv = false,
+                        positionSec = 0,
+                        durationSec = 0,
                         statusMessage = null,
                         errorMessage = error.message ?: "Não foi possível iniciar a transmissão na TV.",
                     )
@@ -409,24 +449,78 @@ object BestCineCastController {
         }
     }
 
-    fun seekBySeconds(deltaSec: Int) {
+    fun seekToSeconds(targetSec: Int) {
         val current = _state.value
         val device = current.activeDevice ?: return
         if (current.activeMedia?.isLive == true) return
+        val maxDur = current.durationSec
+        val clamped = if (maxDur > 0) targetSec.coerceIn(0, maxDur) else targetSec.coerceAtLeast(0)
+        lastKnownPositionSec = clamped
+        lastSeekTimestampMs = bestCineCurrentTimeMillis()
+        _state.update { it.copy(positionSec = clamped) }
         scope.launch {
-            val tvPos = fetchCurrentPositionSeconds(device.avTransportControlUrl) ?: lastKnownPositionSec
-            val targetSec = (tvPos + deltaSec).coerceAtLeast(0)
             val result = sendAvTransportAction(
                 controlUrl = device.avTransportControlUrl,
                 action = "Seek",
                 bodyXml = """
                     <InstanceID>0</InstanceID>
                     <Unit>REL_TIME</Unit>
-                    <Target>${formatDlnaTime(targetSec)}</Target>
+                    <Target>${formatDlnaTime(clamped)}</Target>
                 """.trimIndent(),
             )
             if (result.ok) {
-                lastKnownPositionSec = targetSec
+                lastKnownPositionSec = clamped
+            } else {
+                // Se a TV recusar o seek, ressincroniza com a posição real sem derrubar a reprodução
+                val tvInfo = fetchPositionInfo(device.avTransportControlUrl)
+                if (tvInfo != null) {
+                    lastKnownPositionSec = tvInfo.positionSec
+                    _state.update {
+                        it.copy(
+                            positionSec = tvInfo.positionSec,
+                            durationSec = if (tvInfo.durationSec > 0) tvInfo.durationSec else it.durationSec,
+                        )
+                    }
+                }
+            }
+        }
+    }
+
+    fun seekBySeconds(deltaSec: Int) {
+        val current = _state.value
+        val device = current.activeDevice ?: return
+        if (current.activeMedia?.isLive == true) return
+        scope.launch {
+            val tvPos = fetchPositionInfo(device.avTransportControlUrl)?.positionSec ?: current.positionSec.takeIf { it > 0 } ?: lastKnownPositionSec
+            val targetSec = (tvPos + deltaSec).coerceAtLeast(0)
+            seekToSeconds(targetSec)
+        }
+    }
+
+    private fun startPositionPolling(device: BestCineCastDevice, fallbackDurationSec: Int) {
+        positionPollJob?.cancel()
+        positionPollJob = scope.launch {
+            while (true) {
+                delay(1500L)
+                val cur = _state.value
+                if (cur.activeDevice?.id != device.id || cur.activeMedia?.isLive == true) break
+                val info = fetchPositionInfo(device.avTransportControlUrl) ?: continue
+                // Evita "pulo pra trás" durante ~2s logo após o usuário soltar o slider
+                if (bestCineCurrentTimeMillis() - lastSeekTimestampMs < 2000L) continue
+                val bestDuration = when {
+                    info.durationSec > 0 -> info.durationSec
+                    cur.durationSec > 0 -> cur.durationSec
+                    else -> fallbackDurationSec
+                }
+                val clampedPos = if (bestDuration > 0) info.positionSec.coerceIn(0, bestDuration) else info.positionSec.coerceAtLeast(0)
+                lastKnownPositionSec = clampedPos
+                _state.update {
+                    if (it.activeDevice?.id != device.id) it
+                    else it.copy(
+                        positionSec = clampedPos,
+                        durationSec = bestDuration,
+                    )
+                }
             }
         }
     }
@@ -455,6 +549,8 @@ object BestCineCastController {
 
     fun stopCasting() {
         val device = _state.value.activeDevice
+        positionPollJob?.cancel()
+        positionPollJob = null
         scope.launch {
             if (device != null) {
                 runCatching {
@@ -467,12 +563,15 @@ object BestCineCastController {
             }
             BestCineCastPlatform.stopLocalStreamProxy()
             lastKnownPositionSec = 0
+            lastSeekTimestampMs = 0L
             _state.update {
                 it.copy(
                     activeDevice = null,
                     activeMedia = null,
                     isConnecting = false,
                     isPlayingOnTv = false,
+                    positionSec = 0,
+                    durationSec = 0,
                     statusMessage = null,
                     errorMessage = null,
                 )
@@ -558,7 +657,7 @@ object BestCineCastController {
         SoapResult(ok = false, exceptionMessage = ex.message)
     }
 
-    private suspend fun fetchCurrentPositionSeconds(controlUrl: String): Int? = runCatching {
+    private suspend fun fetchPositionInfo(controlUrl: String): TvPositionInfo? = runCatching {
         val envelope = """
             <?xml version="1.0" encoding="utf-8"?>
             <s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/" s:encodingStyle="http://schemas.xmlsoap.org/soap/encoding/">
@@ -575,8 +674,11 @@ object BestCineCastController {
             setBody(envelope)
         }
         if (!resp.status.isSuccess()) return@runCatching null
-        val relTime = extractXmlTag(resp.bodyAsText(), "RelTime") ?: return@runCatching null
-        parseDlnaTimeToSeconds(relTime)
+        val xml = resp.bodyAsText()
+        val relTime = extractXmlTag(xml, "RelTime") ?: return@runCatching null
+        val posSec = parseDlnaTimeToSeconds(relTime) ?: return@runCatching null
+        val durSec = extractXmlTag(xml, "TrackDuration")?.let { parseDlnaTimeToSeconds(it) } ?: 0
+        TvPositionInfo(positionSec = posSec.coerceAtLeast(0), durationSec = durSec.coerceAtLeast(0))
     }.getOrNull()
 
     private suspend fun fetchCurrentVolume(controlUrl: String): Int? = runCatching {

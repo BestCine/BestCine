@@ -2631,6 +2631,7 @@
     <string name="settings_group_services">Services</string>
     <string name="settings_group_system">System</string>
     <string name="compose_settings_page_layout">Layout</string>
+    <string name="compose_settings_page_bestcine_catalogs">BestCine Catalogs</string>
     <string name="compose_settings_root_layout_description">Home, cards, details, streams, and navigation</string>
     <string name="compose_settings_root_about_description">App info, updates, and acknowledgements</string>
     <string name="settings_playback_page_player">Player</string>

@@ -29,6 +29,7 @@ import androidx.compose.material.icons.filled.SmartDisplay
 import androidx.compose.material.icons.filled.Subtitles
 import androidx.compose.material.icons.filled.Sync
 import androidx.compose.material.icons.filled.VideoSettings
+import androidx.compose.material.icons.rounded.AutoAwesome
 import androidx.compose.material.icons.rounded.Notifications
 import androidx.compose.material.icons.rounded.PlayArrow
 import androidx.compose.material.icons.rounded.Settings
@@ -231,6 +232,11 @@ internal enum class SettingsPage(
         category = SettingsCategory.Look,
         parentPage = Layout,
     ),
+    BestCineCatalogs(
+        titleRes = Res.string.compose_settings_page_bestcine_catalogs,
+        category = SettingsCategory.Look,
+        parentPage = Root,
+    ),
     MetaScreen(
         titleRes = Res.string.compose_settings_page_meta_screen,
         category = SettingsCategory.Look,
@@ -297,6 +303,7 @@ internal val SettingsPage.icon: ImageVector
         SettingsPage.MediaServers -> Icons.Default.Dns
         SettingsPage.MediaServer -> Icons.Default.Dns
         SettingsPage.Homescreen -> Icons.Default.Dashboard
+        SettingsPage.BestCineCatalogs -> Icons.Rounded.AutoAwesome
         SettingsPage.MetaScreen -> Icons.Default.Description
         SettingsPage.Integrations -> Icons.Default.Link
         SettingsPage.TmdbEnrichment -> Icons.Default.Link

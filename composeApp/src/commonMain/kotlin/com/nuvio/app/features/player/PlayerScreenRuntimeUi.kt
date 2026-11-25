@@ -2064,6 +2064,7 @@ private fun PlayerScreenRuntime.RenderPlayerModals(displayedPositionMs: Long) {
                 contentType = activeStreamType?.takeIf { it.isNotBlank() } ?: "video/mp4",
                 isLive = false,
                 startPositionMs = displayedPositionMs,
+                durationMs = playbackSnapshot.durationMs,
             )
         },
         onPauseLocalPlayback = {

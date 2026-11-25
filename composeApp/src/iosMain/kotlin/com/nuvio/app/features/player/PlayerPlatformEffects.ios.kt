@@ -17,28 +17,42 @@ import platform.UIKit.UIScreen
 import platform.UIKit.UISlider
 
 private const val lockPlayerToLandscapeNotification = "NuvioPlayerLockLandscape"
+private const val lockPlayerToPortraitNotification = "NuvioPlayerLockPortrait"
 private const val unlockPlayerOrientationNotification = "NuvioPlayerUnlockOrientation"
 private var playerLandscapeLockCount = 0
+private var playerPortraitLockCount = 0
+
+private fun syncIosPlayerOrientationLock() {
+    val notification = when {
+        playerPortraitLockCount > 0 -> lockPlayerToPortraitNotification
+        playerLandscapeLockCount > 0 -> lockPlayerToLandscapeNotification
+        else -> unlockPlayerOrientationNotification
+    }
+    NSNotificationCenter.defaultCenter.postNotificationName(notification, null)
+}
 
 @Composable
 actual fun LockPlayerToLandscape() {
     DisposableEffect(Unit) {
         playerLandscapeLockCount += 1
-        if (playerLandscapeLockCount == 1) {
-            NSNotificationCenter.defaultCenter.postNotificationName(
-                lockPlayerToLandscapeNotification,
-                null,
-            )
-        }
+        syncIosPlayerOrientationLock()
 
         onDispose {
-            playerLandscapeLockCount -= 1
-            if (playerLandscapeLockCount == 0) {
-                NSNotificationCenter.defaultCenter.postNotificationName(
-                    unlockPlayerOrientationNotification,
-                    null,
-                )
-            }
+            playerLandscapeLockCount = (playerLandscapeLockCount - 1).coerceAtLeast(0)
+            syncIosPlayerOrientationLock()
+        }
+    }
+}
+
+@Composable
+actual fun LockPlayerToPortrait() {
+    DisposableEffect(Unit) {
+        playerPortraitLockCount += 1
+        syncIosPlayerOrientationLock()
+
+        onDispose {
+            playerPortraitLockCount = (playerPortraitLockCount - 1).coerceAtLeast(0)
+            syncIosPlayerOrientationLock()
         }
     }
 }

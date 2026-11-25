@@ -146,7 +146,9 @@ import com.nuvio.app.features.player.PlayerLaunchStore
 import com.nuvio.app.features.player.PlayerSettingsRepository
 import com.nuvio.app.features.player.SubtitleLanguageOption
 import com.nuvio.app.features.player.prepareExternalPlayerLaunch
+import com.nuvio.app.bestcine.cast.BestCineCastController
 import com.nuvio.app.features.player.LockPlayerToLandscape
+import com.nuvio.app.features.player.LockPlayerToPortrait
 import com.nuvio.app.features.player.HidePlayerSystemBars
 import com.nuvio.app.features.player.rememberExternalPlayerLauncher
 import com.nuvio.app.features.profiles.ProfileRepository
@@ -340,9 +342,16 @@ internal fun MainAppContent(
     )
     var visiblePlayerEntries by remember { mutableIntStateOf(0) }
     var streamLandscapeLoadingVisible by remember(currentRoute) { mutableStateOf(false) }
+    val castDialogOpen by BestCineCastController.isCastDialogOpen.collectAsStateWithLifecycle()
+    val globalCastState by BestCineCastController.state.collectAsStateWithLifecycle()
+    val pauseLandscapeForCast = castDialogOpen || globalCastState.isCasting
     if (currentRoute is PlayerRoute || visiblePlayerEntries > 0 || streamLandscapeLoadingVisible) {
-        LockPlayerToLandscape()
-        HidePlayerSystemBars()
+        if (pauseLandscapeForCast) {
+            LockPlayerToPortrait()
+        } else {
+            LockPlayerToLandscape()
+            HidePlayerSystemBars()
+        }
     }
     val p2pSettingsUiState by remember {
         P2pSettingsRepository.ensureLoaded()

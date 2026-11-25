@@ -401,7 +401,7 @@ private fun HomescreenCatalogList(
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
-private fun BestCineStreamingCatalogsSectionCard(
+internal fun BestCineStreamingCatalogsSectionCard(
     isTablet: Boolean,
     config: BestCineStreamingCatalogConfig,
 ) {

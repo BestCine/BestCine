@@ -2577,6 +2577,7 @@
     <string name="settings_playback_page_video">Vídeo</string>
     <string name="settings_playback_page_up_next">A seguir</string>
     <string name="compose_settings_page_layout">Layout</string>
+    <string name="compose_settings_page_bestcine_catalogs">Catálogos BestCine</string>
     <string name="settings_group_you">Você</string>
     <string name="settings_advanced_discord_rich_presence">Discord Rich Presence</string>
     <string name="settings_advanced_discord_rich_presence_description">Mostra no seu perfil do Discord o que você está navegando ou assistindo. Ativado por padrão.</string>

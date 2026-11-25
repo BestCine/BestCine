@@ -58,7 +58,7 @@ internal actual fun BestCineCastModalContainer(
     val dialogState = rememberDialogState(
         position = WindowPosition(Alignment.Center),
         width = 520.dp,
-        height = 640.dp,
+        height = 700.dp,
     )
     DialogWindow(
         onCloseRequest = onDismissRequest,

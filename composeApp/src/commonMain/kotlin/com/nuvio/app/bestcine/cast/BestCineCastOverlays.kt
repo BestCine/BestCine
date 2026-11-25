@@ -193,6 +193,17 @@ fun BestCineCastPlayerLockOverlay(
             }
 
             if (!castState.isConnecting) {
+                if (!compact && castState.activeMedia?.isLive != true && castState.durationSec > 0) {
+                    BestCineCastSeekBar(
+                        positionSec = castState.positionSec,
+                        durationSec = castState.durationSec,
+                        onSeekFinished = { targetSec ->
+                            BestCineCastController.seekToSeconds(targetSec)
+                        },
+                        modifier = Modifier.padding(horizontal = 4.dp),
+                    )
+                }
+
                 Row(
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                     verticalAlignment = Alignment.CenterVertically,

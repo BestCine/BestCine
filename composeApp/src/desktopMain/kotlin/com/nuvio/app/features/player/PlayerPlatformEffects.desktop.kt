@@ -18,6 +18,9 @@ import java.util.concurrent.TimeUnit
 actual fun LockPlayerToLandscape() = Unit
 
 @Composable
+actual fun LockPlayerToPortrait() = Unit
+
+@Composable
 actual fun FullscreenPlayerDialog(
     onDismiss: () -> Unit,
     content: @Composable () -> Unit,

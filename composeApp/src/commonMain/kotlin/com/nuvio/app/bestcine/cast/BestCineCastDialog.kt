@@ -44,11 +44,18 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Slider
+import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -70,6 +77,13 @@ fun BestCineCastDialog(
     onDismiss: () -> Unit,
 ) {
     if (!visible) return
+
+    DisposableEffect(Unit) {
+        BestCineCastController.registerCastDialogOpen()
+        onDispose {
+            BestCineCastController.unregisterCastDialogOpen()
+        }
+    }
 
     val castState by BestCineCastController.state.collectAsStateWithLifecycle()
 
@@ -250,11 +264,13 @@ fun BestCineCastDialog(
                 HorizontalDivider(color = Color.White.copy(alpha = 0.07f))
 
                 // ============================================================
-                // CORPO DO MODAL
+                // CORPO DO MODAL (SCROLL UNIFICADO — SUPORTA MUITAS TVs SEM CORTAR)
                 // ============================================================
                 Column(
                     modifier = Modifier
                         .fillMaxWidth()
+                        .weight(1f, fill = false)
+                        .verticalScroll(rememberScrollState())
                         .padding(horizontal = 20.dp, vertical = 16.dp),
                     verticalArrangement = Arrangement.spacedBy(14.dp),
                 ) {
@@ -391,6 +407,17 @@ fun BestCineCastDialog(
                                             color = Color(0xFF86EFAC),
                                         )
                                     }
+                                }
+
+                                // Barra de progresso arrastável (somente Filmes / Séries com duração)
+                                if (castState.activeMedia?.isLive != true && castState.durationSec > 0) {
+                                    BestCineCastSeekBar(
+                                        positionSec = castState.positionSec,
+                                        durationSec = castState.durationSec,
+                                        onSeekFinished = { targetSec ->
+                                            BestCineCastController.seekToSeconds(targetSec)
+                                        },
+                                    )
                                 }
 
                                 // Controles táteis de reprodução + volume
@@ -572,12 +599,9 @@ fun BestCineCastDialog(
                         }
                     }
 
-                    // Lista de TVs DLNA encontradas
+                    // Lista de TVs DLNA encontradas (integrada ao scroll principal para rolar suavemente com muitas TVs)
                     Column(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .heightIn(max = 240.dp)
-                            .verticalScroll(rememberScrollState()),
+                        modifier = Modifier.fillMaxWidth(),
                         verticalArrangement = Arrangement.spacedBy(10.dp),
                     ) {
                         if (castState.isConnecting) {
@@ -887,5 +911,77 @@ fun BestCineCastDialog(
                 }
             }
         }
+    }
+}
+
+@Composable
+internal fun BestCineCastSeekBar(
+    positionSec: Int,
+    durationSec: Int,
+    onSeekFinished: (Int) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val safeDuration = durationSec.coerceAtLeast(1)
+    var isDragging by remember { mutableStateOf(false) }
+    var dragSec by remember { mutableIntStateOf(positionSec.coerceIn(0, safeDuration)) }
+
+    val displayedSec = if (isDragging) dragSec else positionSec.coerceIn(0, safeDuration)
+
+    Column(
+        modifier = modifier.fillMaxWidth(),
+        verticalArrangement = Arrangement.spacedBy(2.dp),
+    ) {
+        Slider(
+            value = displayedSec.toFloat(),
+            onValueChange = { next ->
+                isDragging = true
+                dragSec = next.toInt().coerceIn(0, safeDuration)
+            },
+            onValueChangeFinished = {
+                val target = dragSec.coerceIn(0, safeDuration)
+                isDragging = false
+                onSeekFinished(target)
+            },
+            valueRange = 0f..safeDuration.toFloat(),
+            colors = SliderDefaults.colors(
+                thumbColor = Color.White,
+                activeTrackColor = BestCineBranding.PrimaryBlueBright,
+                inactiveTrackColor = Color.White.copy(alpha = 0.22f),
+            ),
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(30.dp),
+        )
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 2.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                text = formatCastTimeLabel(displayedSec),
+                style = MaterialTheme.typography.labelSmall,
+                color = if (isDragging) Color.White else Color(0xFFCBD5E1),
+                fontWeight = if (isDragging) FontWeight.Bold else FontWeight.Medium,
+            )
+            Text(
+                text = formatCastTimeLabel(safeDuration),
+                style = MaterialTheme.typography.labelSmall,
+                color = Color(0xFF94A3B8),
+            )
+        }
+    }
+}
+
+internal fun formatCastTimeLabel(totalSeconds: Int): String {
+    val clamped = totalSeconds.coerceAtLeast(0)
+    val h = clamped / 3600
+    val m = (clamped % 3600) / 60
+    val s = clamped % 60
+    return if (h > 0) {
+        "${h}:${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}"
+    } else {
+        "${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}"
     }
 }

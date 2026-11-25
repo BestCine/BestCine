@@ -119,6 +119,7 @@ import com.nuvio.app.core.ui.nuvio
 import com.nuvio.app.core.ui.toggleFullscreenAction
 import com.nuvio.app.features.player.HidePlayerSystemBars
 import com.nuvio.app.features.player.LockPlayerToLandscape
+import com.nuvio.app.features.player.LockPlayerToPortrait
 import com.nuvio.app.features.player.ManagePlayerPictureInPicture
 import com.nuvio.app.features.player.PlatformPlayerSurface
 import com.nuvio.app.features.player.PlayerControlsAction
@@ -224,9 +225,15 @@ internal fun BestCineTvScreen(
         exitFullscreen()
     }
 
+    val tvCastDialogOpen by BestCineCastController.isCastDialogOpen.collectAsStateWithLifecycle()
+    val tvCastState by BestCineCastController.state.collectAsStateWithLifecycle()
     if (isSelectedTab && isFullscreen && !isInPip) {
-        LockPlayerToLandscape()
-        HidePlayerSystemBars()
+        if (tvCastDialogOpen || tvCastState.isCasting) {
+            LockPlayerToPortrait()
+        } else {
+            LockPlayerToLandscape()
+            HidePlayerSystemBars()
+        }
     }
 
     LaunchedEffect(Unit) {

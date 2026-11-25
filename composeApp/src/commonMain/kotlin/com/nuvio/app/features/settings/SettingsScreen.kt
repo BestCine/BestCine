@@ -782,6 +782,10 @@ private fun MobileSettingsScreen(
                     isCatalogLoading = homescreenCatalogLoading,
                     catalogErrorMessage = homescreenCatalogErrorMessage,
                 )
+                SettingsPage.BestCineCatalogs -> bestCineCatalogsSettingsContent(
+                    isTablet = false,
+                    onOpenHomescreenOrder = onHomescreenClick,
+                )
                 SettingsPage.MetaScreen -> metaScreenSettingsContent(
                     isTablet = false,
                     uiState = metaScreenSettingsUiState,
@@ -942,18 +946,21 @@ private fun TabletSettingsScreen(
                         .fillMaxWidth()
                         .padding(horizontal = 24.dp)
                         .padding(bottom = 20.dp),
-                    style = MaterialTheme.typography.displayLarge,
+                    style = MaterialTheme.typography.headlineLarge,
                     color = MaterialTheme.colorScheme.onSurface,
                     fontWeight = FontWeight.Bold,
+                    maxLines = 1,
+                    softWrap = false,
                 )
                 HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
 
                 Spacer(modifier = Modifier.height(10.dp))
+                val isBestCineCatalogsSelected = page == SettingsPage.BestCineCatalogs
                 SettingsCategory.entries.forEach { category ->
                     SettingsSidebarItem(
                         label = stringResource(category.labelRes),
                         icon = category.icon,
-                        selected = category == activeCategory,
+                        selected = !isBestCineCatalogsSelected && category == activeCategory,
                         onClick = {
                             selectedCategory = category.name
                             if (page != SettingsPage.Root) {
@@ -965,19 +972,35 @@ private fun TabletSettingsScreen(
                                 if (category == SettingsCategory.entries.first()) {
                                     up = FocusRequester.Cancel
                                 }
-                                if (category == SettingsCategory.entries.last()) {
-                                    down = FocusRequester.Cancel
-                                }
                                 right = ContentEntry.requester
                             }
                             .then(
-                                if (category == activeCategory) {
+                                if (!isBestCineCatalogsSelected && category == activeCategory) {
                                     Modifier.focusRequester(categoryEntryRequester)
                                 } else {
                                     Modifier
                                 },
                             ),
                     )
+                    if (category == SettingsCategory.You) {
+                        BestCineCatalogsSidebarItem(
+                            selected = isBestCineCatalogsSelected,
+                            onClick = {
+                                onPageChange(SettingsPage.BestCineCatalogs)
+                            },
+                            modifier = Modifier
+                                .focusProperties {
+                                    right = ContentEntry.requester
+                                }
+                                .then(
+                                    if (isBestCineCatalogsSelected) {
+                                        Modifier.focusRequester(categoryEntryRequester)
+                                    } else {
+                                        Modifier
+                                    },
+                                ),
+                        )
+                    }
                 }
             }
         }
@@ -1058,7 +1081,7 @@ private fun TabletSettingsScreen(
                                 } else {
                                     stringResource(page.titleRes)
                                 },
-                                showBack = previousPage != null,
+                                showBack = previousPage != null && page != SettingsPage.BestCineCatalogs,
                                 onBack = onNavigateBack,
                             )
                         }
@@ -1211,6 +1234,10 @@ private fun TabletSettingsScreen(
                             items = homescreenItems,
                             isCatalogLoading = homescreenCatalogLoading,
                             catalogErrorMessage = homescreenCatalogErrorMessage,
+                        )
+                        SettingsPage.BestCineCatalogs -> bestCineCatalogsSettingsContent(
+                            isTablet = true,
+                            onOpenHomescreenOrder = { openInlinePage(SettingsPage.Homescreen) },
                         )
                         SettingsPage.MetaScreen -> metaScreenSettingsContent(
                             isTablet = true,

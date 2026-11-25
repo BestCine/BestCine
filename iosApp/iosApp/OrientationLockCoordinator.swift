@@ -3,6 +3,7 @@ import UserNotifications
 import ComposeApp
 
 private let lockPlayerToLandscapeNotification = Notification.Name("NuvioPlayerLockLandscape")
+private let lockPlayerToPortraitNotification = Notification.Name("NuvioPlayerLockPortrait")
 private let unlockPlayerOrientationNotification = Notification.Name("NuvioPlayerUnlockOrientation")
 
 final class OrientationLockAppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDelegate {
@@ -72,20 +73,24 @@ final class OrientationLockCoordinator {
         let center = NotificationCenter.default
         observers.append(
             center.addObserver(forName: lockPlayerToLandscapeNotification, object: nil, queue: .main) { [weak self] _ in
-                self?.setLandscapeLock(enabled: true)
+                self?.setOrientationMask(.landscape, forceRotate: true)
+            }
+        )
+        observers.append(
+            center.addObserver(forName: lockPlayerToPortraitNotification, object: nil, queue: .main) { [weak self] _ in
+                self?.setOrientationMask(.portrait, forceRotate: true)
             }
         )
         observers.append(
             center.addObserver(forName: unlockPlayerOrientationNotification, object: nil, queue: .main) { [weak self] _ in
-                self?.setLandscapeLock(enabled: false)
+                self?.setOrientationMask(.allButUpsideDown, forceRotate: false)
             }
         )
     }
 
-    private func setLandscapeLock(enabled: Bool) {
-        let nextOrientations: UIInterfaceOrientationMask = enabled ? .landscape : .allButUpsideDown
+    private func setOrientationMask(_ nextOrientations: UIInterfaceOrientationMask, forceRotate: Bool) {
         supportedOrientations = nextOrientations
-        requestOrientationUpdate(for: nextOrientations, forceRotate: enabled)
+        requestOrientationUpdate(for: nextOrientations, forceRotate: forceRotate)
     }
 
     private func requestOrientationUpdate(for mask: UIInterfaceOrientationMask, forceRotate: Bool) {
@@ -105,8 +110,10 @@ final class OrientationLockCoordinator {
                     window.rootViewController?.setNeedsUpdateOfSupportedInterfaceOrientations()
                 }
         } else {
-            if forceRotate {
+            if forceRotate && mask == .landscape {
                 UIDevice.current.setValue(preferredLandscapeOrientation.rawValue, forKey: "orientation")
+            } else if forceRotate && mask == .portrait {
+                UIDevice.current.setValue(UIInterfaceOrientation.portrait.rawValue, forKey: "orientation")
             } else if UIDevice.current.orientation.isPortrait {
                 UIDevice.current.setValue(UIInterfaceOrientation.portrait.rawValue, forKey: "orientation")
             }

@@ -26,6 +26,7 @@ data class BestCineCastMedia(
     val contentType: String = "video/mp4",
     val isLive: Boolean = false,
     val startPositionMs: Long = 0L,
+    val durationMs: Long = 0L,
 )
 
 data class BestCineCastState(
@@ -36,6 +37,8 @@ data class BestCineCastState(
     val isConnecting: Boolean = false,
     val isPlayingOnTv: Boolean = false,
     val volumePercent: Int = 50,
+    val positionSec: Int = 0,
+    val durationSec: Int = 0,
     val statusMessage: String? = null,
     val errorMessage: String? = null,
 ) {
