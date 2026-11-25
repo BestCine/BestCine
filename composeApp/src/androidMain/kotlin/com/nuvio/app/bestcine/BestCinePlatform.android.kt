@@ -176,7 +176,7 @@ internal actual object BestCinePlatformAuth {
         activeServerSocket = serverSocket
         val port = serverSocket.localPort
 
-        val authUrl = "$cleanOrigin/auth/app?port=$port&state=${URLEncoder.encode(expectedState, "UTF-8")}"
+        val authUrl = "$cleanOrigin/auth/app?port=$port&state=${URLEncoder.encode(expectedState, "UTF-8")}&cb=deeplink"
         val opened = openAuthInRealBrowser(context, authUrl)
 
         if (!opened) {
