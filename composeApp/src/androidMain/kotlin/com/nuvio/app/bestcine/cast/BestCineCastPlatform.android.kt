@@ -267,8 +267,9 @@ private class AndroidDlnaHttpProxy(
     private val httpClient = OkHttpClient.Builder()
         .dns(BestCineDohDns)
         .connectTimeout(12, TimeUnit.SECONDS)
-        .readTimeout(30, TimeUnit.SECONDS)
-        .writeTimeout(15, TimeUnit.SECONDS)
+        .readTimeout(if (isLiveStream) 18 else 45, TimeUnit.SECONDS)
+        .writeTimeout(20, TimeUnit.SECONDS)
+        .pingInterval(20, TimeUnit.SECONDS)
         .followRedirects(true)
         .followSslRedirects(true)
         .retryOnConnectionFailure(true)
@@ -323,7 +324,7 @@ private class AndroidDlnaHttpProxy(
                 socket.tcpNoDelay = true
                 socket.keepAlive = true
             }
-            socket.soTimeout = 45_000
+            socket.soTimeout = 15_000
             val reader = BufferedReader(InputStreamReader(socket.getInputStream(), StandardCharsets.ISO_8859_1))
             val requestLine = reader.readLine() ?: return
             val parts = requestLine.split(' ')
@@ -339,6 +340,8 @@ private class AndroidDlnaHttpProxy(
                     reqHeaders[line.substring(0, idx).trim().lowercase()] = line.substring(idx + 1).trim()
                 }
             }
+            // Após ler headers HTTP da TV, desativa soTimeout para suportar pausas longas
+            runCatching { socket.soTimeout = 0 }
 
             val out = BufferedOutputStream(socket.getOutputStream(), 32 * 1024)
             val dlnaOp = if (isLiveStream) "00" else "01"
@@ -408,24 +411,34 @@ private class AndroidDlnaHttpProxy(
     }
 
     private fun handleVodGet(out: OutputStream, rangeHeader: String?, dlnaFeatures: String) {
-        val resp = openUpstreamWithRetry(defaultUrl, rangeHeader = rangeHeader, maxAttempts = 2)
+        val resp = openUpstreamWithRetry(defaultUrl, rangeHeader = rangeHeader, maxAttempts = 3)
         if (resp == null) {
-            val err = "HTTP/1.1 502 Bad Gateway\r\nConnection: close\r\n\r\n"
-            out.write(err.toByteArray(StandardCharsets.ISO_8859_1))
-            out.flush()
+            runCatching {
+                out.write("HTTP/1.1 502 Bad Gateway\r\nConnection: close\r\n\r\n".toByteArray(StandardCharsets.ISO_8859_1))
+                out.flush()
+            }
             return
         }
+
+        var resumeUrl = defaultUrl
+        var startOffset = 0L
+        var endOffset = -1L
+        var expectedLength = -1L
+        var bytesSent = 0L
+        var clientDisconnected = false
 
         resp.use { r ->
             val statusCode = r.code
             val rawMime = r.header("Content-Type")
             val finalUrl = r.request.url.toString()
+            resumeUrl = finalUrl
             val body = r.body
             if (body == null || statusCode !in 200..299) {
                 lastDiagnostic = "GET origem retornou HTTP $statusCode"
-                val err = "HTTP/1.1 $statusCode Error\r\nConnection: close\r\n\r\n"
-                out.write(err.toByteArray(StandardCharsets.ISO_8859_1))
-                out.flush()
+                runCatching {
+                    out.write("HTTP/1.1 $statusCode Error\r\nConnection: close\r\n\r\n".toByteArray(StandardCharsets.ISO_8859_1))
+                    out.flush()
+                }
                 return
             }
 
@@ -447,6 +460,8 @@ private class AndroidDlnaHttpProxy(
                     initialUrl = finalUrl,
                     out = out,
                     dlnaFeatures = "DLNA.ORG_OP=00;DLNA.ORG_CI=0;DLNA.ORG_FLAGS=01700000000000000000000000000000",
+                    normalizer = BestCineMpegTsTools.MpegTsNormalizer(),
+                    alreadySentHeaders = false,
                 )
                 return
             }
@@ -454,6 +469,18 @@ private class AndroidDlnaHttpProxy(
             val safeMime = normalizeVideoMime(rawMime, defaultContentType)
             val contentLength = body.contentLength()
             val contentRange = r.header("Content-Range")
+            val parsedRange = parseContentRangeBounds(contentRange)
+            if (parsedRange != null) {
+                startOffset = parsedRange.first
+                endOffset = parsedRange.second
+                expectedLength = (endOffset - startOffset + 1L).coerceAtLeast(0L)
+            } else {
+                val reqBounds = parseRequestRangeBounds(rangeHeader)
+                startOffset = reqBounds?.first ?: 0L
+                endOffset = reqBounds?.second ?: if (contentLength > 0L) startOffset + contentLength - 1L else -1L
+                expectedLength = contentLength
+            }
+
             val statusMsg = if (statusCode == 206) "Partial Content" else "OK"
             lastDiagnostic = "GET -> HTTP $statusCode ($safeMime)"
 
@@ -468,53 +495,138 @@ private class AndroidDlnaHttpProxy(
                 append("contentFeatures.dlna.org: $dlnaFeatures\r\n")
                 append("Connection: close\r\n\r\n")
             }
-            out.write(headerBlock.toByteArray(StandardCharsets.ISO_8859_1))
-            out.flush()
+            try {
+                out.write(headerBlock.toByteArray(StandardCharsets.ISO_8859_1))
+                out.flush()
+            } catch (_: Throwable) {
+                clientDisconnected = true
+                return
+            }
 
             val buffer = ByteArray(32 * 1024)
             while (running) {
-                val read = input.read(buffer)
+                val read = try {
+                    input.read(buffer)
+                } catch (_: Throwable) {
+                    -1
+                }
                 if (read <= 0) break
-                out.write(buffer, 0, read)
+                try {
+                    out.write(buffer, 0, read)
+                    bytesSent += read
+                } catch (_: Throwable) {
+                    clientDisconnected = true
+                    break
+                }
             }
-            out.flush()
+            runCatching { out.flush() }
+        }
+
+        // Reconexão transparente por Range: se a CDN/proxy encerrar a conexão após ~20-25 min
+        // ou durante pausa/oscilação antes do fim real do arquivo, retoma no byte exato no mesmo socket da TV!
+        var resumeRetries = 0
+        while (running && !clientDisconnected && expectedLength > 0L && bytesSent < expectedLength && resumeRetries < 16) {
+            val nextOffset = startOffset + bytesSent
+            val resumeRange = if (endOffset >= nextOffset) {
+                "bytes=$nextOffset-$endOffset"
+            } else {
+                "bytes=$nextOffset-"
+            }
+            val targetUrl = if (resumeRetries % 2 == 0) resumeUrl else defaultUrl
+            lastDiagnostic = "VOD retomando em byte $nextOffset/$expectedLength (tentativa ${resumeRetries + 1})"
+
+            val resumed = openUpstreamWithRetry(targetUrl, rangeHeader = resumeRange, maxAttempts = 2)
+                ?: if (targetUrl != defaultUrl) openUpstreamWithRetry(defaultUrl, rangeHeader = resumeRange, maxAttempts = 2) else null
+
+            if (resumed == null) {
+                resumeRetries += 1
+                if (!safeSleep(700L * minOf(resumeRetries, 5))) return
+                continue
+            }
+
+            var chunkBytes = 0L
+            resumed.use { r ->
+                val body = r.body
+                val validResume = (r.code == 206) || (r.code == 200 && nextOffset == 0L)
+                if (!validResume || body == null) {
+                    resumeRetries += 1
+                    return@use
+                }
+                resumeUrl = r.request.url.toString()
+                val input = BufferedInputStream(body.byteStream(), 64 * 1024)
+                val buffer = ByteArray(32 * 1024)
+                while (running && bytesSent < expectedLength) {
+                    val remaining = expectedLength - bytesSent
+                    val toRead = minOf(buffer.size.toLong(), remaining).toInt()
+                    val read = try {
+                        input.read(buffer, 0, toRead)
+                    } catch (_: Throwable) {
+                        -1
+                    }
+                    if (read <= 0) break
+                    try {
+                        out.write(buffer, 0, read)
+                        bytesSent += read
+                        chunkBytes += read
+                    } catch (_: Throwable) {
+                        clientDisconnected = true
+                        break
+                    }
+                }
+                runCatching { out.flush() }
+            }
+
+            if (clientDisconnected) return
+            if (chunkBytes >= 64 * 1024L) {
+                resumeRetries = 0
+            } else {
+                resumeRetries += 1
+                if (!safeSleep(650L * minOf(resumeRetries, 5))) return
+            }
         }
     }
 
     /**
      * Entrega canais Ao Vivo (sejam TS puros ou HLS/Pluto TV) em `video/mp2t` contínuo:
-     * - Em TS puro: reconecta automaticamente + suaviza CC/PTS/PCR com [MpegTsNormalizer] para nunca cair!
-     * - Em HLS: prioriza variantes muxed; se o áudio vier separado (Pluto TV), muxa vídeo+áudio em
-     *   tempo real com PAT/PMT unificados + suaviza cortes de comercial (#EXT-X-DISCONTINUITY)!
+     * - Em TS puro: reconexão contínua + keepalive NULL + normalizador PTS/PCR/CC;
+     * - Em HLS/Pluto TV: loop externo resiliente + muxer vídeo+áudio separado + renovação de tokens + keepalive NULL!
      */
     private fun handleLiveOrHlsAsTsStream(out: OutputStream, dlnaFeatures: String) {
         val normalizer = BestCineMpegTsTools.MpegTsNormalizer()
         var headersSent = false
         var reconnects = 0
 
-        while (running && reconnects < 12) {
+        while (running && reconnects < 30) {
             val resp = openUpstreamWithRetry(defaultUrl, rangeHeader = null, maxAttempts = 3)
             if (resp == null) {
                 if (!headersSent) {
-                    out.write("HTTP/1.1 502 Bad Gateway\r\nConnection: close\r\n\r\n".toByteArray(StandardCharsets.ISO_8859_1))
-                    out.flush()
+                    runCatching {
+                        out.write("HTTP/1.1 502 Bad Gateway\r\nConnection: close\r\n\r\n".toByteArray(StandardCharsets.ISO_8859_1))
+                        out.flush()
+                    }
                     return
                 }
+                if (!writeKeepaliveNullPacket(out)) return
                 reconnects += 1
-                if (!safeSleep(500L)) return
+                if (!safeSleep(800L)) return
                 continue
             }
 
             var clientDisconnected = false
+            var streamedBytes = 0L
+            var wasHls = false
             resp.use { r ->
                 val statusCode = r.code
                 val body = r.body
                 if (body == null || statusCode !in 200..299) {
                     lastDiagnostic = "Live origem retornou HTTP $statusCode"
                     if (!headersSent) {
-                        out.write("HTTP/1.1 $statusCode Bad Gateway\r\nConnection: close\r\n\r\n".toByteArray(StandardCharsets.ISO_8859_1))
-                        out.flush()
-                        return
+                        runCatching {
+                            out.write("HTTP/1.1 $statusCode Bad Gateway\r\nConnection: close\r\n\r\n".toByteArray(StandardCharsets.ISO_8859_1))
+                            out.flush()
+                        }
+                        clientDisconnected = true
+                        return@use
                     }
                     return@use
                 }
@@ -533,22 +645,39 @@ private class AndroidDlnaHttpProxy(
                     finalUrl.substringBefore('?').lowercase().endsWith(".m3u8")
 
                 if (isHlsPlaylist) {
+                    wasHls = true
                     lastDiagnostic = "Live HLS -> video/mp2t (muxed+normalizado)"
                     val initialPlaylist = input.bufferedReader(StandardCharsets.UTF_8).readText()
-                    streamHlsAsMpegTs(initialPlaylist, finalUrl, out, dlnaFeatures)
-                    return
+                    val hlsResult = streamHlsAsMpegTs(
+                        initialText = initialPlaylist,
+                        initialUrl = finalUrl,
+                        out = out,
+                        dlnaFeatures = dlnaFeatures,
+                        normalizer = normalizer,
+                        alreadySentHeaders = headersSent,
+                    )
+                    headersSent = headersSent || hlsResult.headersSent
+                    clientDisconnected = hlsResult.clientDisconnected
+                    if (hlsResult.streamedAnySegment) {
+                        streamedBytes = 512 * 1024L
+                    }
+                    return@use
                 }
 
                 lastDiagnostic = "Live TS -> video/mp2t"
                 if (!headersSent) {
-                    writeLiveTsHeaders(out, dlnaFeatures)
-                    headersSent = true
+                    try {
+                        writeLiveTsHeaders(out, dlnaFeatures)
+                        headersSent = true
+                    } catch (_: Throwable) {
+                        clientDisconnected = true
+                        return@use
+                    }
                 } else {
                     normalizer.markDiscontinuity()
                 }
 
                 val buffer = ByteArray(16 * 1024)
-                var streamedBytes = 0L
                 while (running) {
                     val read = try {
                         input.read(buffer)
@@ -567,15 +696,26 @@ private class AndroidDlnaHttpProxy(
                         break
                     }
                 }
-                if (streamedBytes > 256 * 1024L) {
-                    reconnects = 0
-                }
             }
 
             if (clientDisconnected) return
-            reconnects += 1
-            if (!safeSleep(450L)) return
+            if (headersSent && !writeKeepaliveNullPacket(out)) return
+            if (streamedBytes > 128 * 1024L) {
+                reconnects = 0
+                if (wasHls) normalizer.markDiscontinuity()
+            } else {
+                reconnects += 1
+            }
+            if (!safeSleep(if (wasHls) 900L else 550L)) return
         }
+    }
+
+    private fun writeKeepaliveNullPacket(out: OutputStream): Boolean = try {
+        out.write(BestCineMpegTsTools.NULL_PACKET)
+        out.flush()
+        true
+    } catch (_: Throwable) {
+        false
     }
 
     private fun writeLiveTsHeaders(out: OutputStream, dlnaFeatures: String) {
@@ -597,37 +737,59 @@ private class AndroidDlnaHttpProxy(
         val externalAudioPlaylistUrl: String?,
     )
 
+    private data class HlsStreamOutcome(
+        val clientDisconnected: Boolean,
+        val headersSent: Boolean,
+        val streamedAnySegment: Boolean,
+    )
+
     private fun streamHlsAsMpegTs(
         initialText: String,
         initialUrl: String,
         out: OutputStream,
         dlnaFeatures: String,
-    ) {
+        normalizer: BestCineMpegTsTools.MpegTsNormalizer,
+        alreadySentHeaders: Boolean,
+    ): HlsStreamOutcome {
         var videoMediaUrl = initialUrl
         var audioMediaUrl: String? = null
         var videoPlaylistText = initialText
+        var headersSent = alreadySentHeaders
+        var streamedAny = false
 
         if (videoPlaylistText.contains("#EXT-X-STREAM-INF")) {
             val selected = pickBestVariantWithAudio(videoPlaylistText, videoMediaUrl) ?: run {
-                out.write("HTTP/1.1 502 Bad Gateway\r\nConnection: close\r\n\r\n".toByteArray(StandardCharsets.ISO_8859_1))
-                out.flush()
-                return
+                if (!headersSent) {
+                    runCatching {
+                        out.write("HTTP/1.1 502 Bad Gateway\r\nConnection: close\r\n\r\n".toByteArray(StandardCharsets.ISO_8859_1))
+                        out.flush()
+                    }
+                }
+                return HlsStreamOutcome(clientDisconnected = false, headersSent = headersSent, streamedAnySegment = false)
             }
             videoMediaUrl = selected.videoPlaylistUrl
             audioMediaUrl = selected.externalAudioPlaylistUrl
             videoPlaylistText = fetchTextWithRetry(videoMediaUrl, attempts = 3) ?: run {
-                out.write("HTTP/1.1 502 Bad Gateway\r\nConnection: close\r\n\r\n".toByteArray(StandardCharsets.ISO_8859_1))
-                out.flush()
-                return
+                if (!headersSent) {
+                    runCatching {
+                        out.write("HTTP/1.1 502 Bad Gateway\r\nConnection: close\r\n\r\n".toByteArray(StandardCharsets.ISO_8859_1))
+                        out.flush()
+                    }
+                }
+                return HlsStreamOutcome(clientDisconnected = false, headersSent = headersSent, streamedAnySegment = false)
             }
         }
 
-        val normalizer = BestCineMpegTsTools.MpegTsNormalizer()
-        val sentSegments = LinkedHashSet<String>()
+        if (headersSent) {
+            normalizer.markDiscontinuity()
+        }
+
+        val sentKeys = LinkedHashSet<String>()
         val keyCache = HashMap<String, ByteArray>()
+        var lastStreamedSeq = -1L
         var isFirstPoll = true
-        var headersSent = false
-        var consecutiveErrors = 0
+        var consecutiveEmptyPolls = 0
+        var staleNoNewSegs = 0
 
         while (running) {
             val pollStartMs = System.currentTimeMillis()
@@ -635,10 +797,13 @@ private class AndroidDlnaHttpProxy(
             val segments = parsedVideo.segments
 
             if (segments.isEmpty()) {
-                consecutiveErrors += 1
-                if (consecutiveErrors >= 10) break
-                if (!safeSleep(800L)) return
-                val refreshed = refreshVideoAndAudioUrls(videoMediaUrl, audioMediaUrl)
+                consecutiveEmptyPolls += 1
+                if (headersSent && !writeKeepaliveNullPacket(out)) {
+                    return HlsStreamOutcome(true, headersSent, streamedAny)
+                }
+                if (consecutiveEmptyPolls >= 16) break
+                if (!safeSleep(850L)) return HlsStreamOutcome(true, headersSent, streamedAny)
+                val refreshed = refreshVideoAndAudioUrls(videoMediaUrl, audioMediaUrl, forceMaster = consecutiveEmptyPolls >= 3)
                 if (refreshed != null) {
                     videoMediaUrl = refreshed.first
                     audioMediaUrl = refreshed.second
@@ -646,31 +811,61 @@ private class AndroidDlnaHttpProxy(
                 }
                 continue
             }
-            consecutiveErrors = 0
+            consecutiveEmptyPolls = 0
 
-            // Se houver playlist de áudio separado (Pluto TV), busca a playlist de áudio sincronizada por mediaSequence!
-            val audioBySeq: Map<Long, HlsSegment> = if (audioMediaUrl != null) {
-                val aText = fetchTextWithRetry(audioMediaUrl, attempts = 2)
-                if (aText != null) {
-                    val parsedAudio = parseHlsMediaPlaylist(aText, audioMediaUrl)
-                    parsedAudio.segments.associateBy { it.sequence }
-                } else {
-                    emptyMap()
+            if (lastStreamedSeq >= 0L && !parsedVideo.isVod) {
+                val firstSeq = segments.first().sequence
+                val lastSeq = segments.last().sequence
+                if (lastSeq < lastStreamedSeq - 30L || firstSeq > lastStreamedSeq + 60L) {
+                    sentKeys.clear()
+                    normalizer.markDiscontinuity()
+                    isFirstPoll = true
                 }
-            } else {
-                emptyMap()
+            }
+
+            // Se houver playlist de áudio separado (Pluto TV), renova master caso o token do áudio expire
+            var audioBySeq: Map<Long, HlsSegment> = emptyMap()
+            val curAudioUrl = audioMediaUrl
+            if (curAudioUrl != null) {
+                var activeAudioUrl = curAudioUrl
+                var aText = fetchTextWithRetry(activeAudioUrl, attempts = 2)
+                if (aText == null) {
+                    val refreshed = refreshVideoAndAudioUrls(videoMediaUrl, activeAudioUrl, forceMaster = true)
+                    val newAudioUrl = refreshed?.second
+                    if (refreshed != null && newAudioUrl != null) {
+                        videoMediaUrl = refreshed.first
+                        audioMediaUrl = newAudioUrl
+                        activeAudioUrl = newAudioUrl
+                        videoPlaylistText = refreshed.third
+                        aText = fetchTextWithRetry(newAudioUrl, attempts = 2)
+                    }
+                }
+                if (aText != null) {
+                    val parsedAudio = parseHlsMediaPlaylist(aText, activeAudioUrl)
+                    audioBySeq = parsedAudio.segments.associateBy { it.sequence }
+                }
             }
 
             val toStream = if (isFirstPoll && !parsedVideo.isVod && segments.size > 3) {
-                segments.dropLast(2).forEach { sentSegments.add(it.url) }
+                segments.dropLast(2).forEach { sentKeys.add(segmentDedupeKey(it)) }
                 segments.takeLast(2)
             } else {
-                segments.filter { it.url !in sentSegments }
+                segments.filter { segmentDedupeKey(it) !in sentKeys }
             }
             isFirstPoll = false
 
+            if (toStream.isEmpty()) {
+                staleNoNewSegs += 1
+                if (headersSent && !writeKeepaliveNullPacket(out)) {
+                    return HlsStreamOutcome(true, headersSent, streamedAny)
+                }
+            } else {
+                staleNoNewSegs = 0
+            }
+
+            var consecutiveSegFailures = 0
             for (seg in toStream) {
-                if (!running) return
+                if (!running) return HlsStreamOutcome(true, headersSent, streamedAny)
                 if (seg.precededByDiscontinuity) {
                     normalizer.markDiscontinuity()
                 }
@@ -702,43 +897,72 @@ private class AndroidDlnaHttpProxy(
                     )
                 }
 
-                if (streamed == SegmentStreamResult.CLIENT_DISCONNECTED) return
+                if (streamed == SegmentStreamResult.CLIENT_DISCONNECTED) {
+                    return HlsStreamOutcome(true, headersSent, streamedAny)
+                }
                 if (streamed == SegmentStreamResult.OK) {
                     headersSent = true
-                    sentSegments.add(seg.url)
-                    if (sentSegments.size > 128) {
-                        val it = sentSegments.iterator()
+                    streamedAny = true
+                    consecutiveSegFailures = 0
+                    lastStreamedSeq = seg.sequence
+                    sentKeys.add(segmentDedupeKey(seg))
+                    if (sentKeys.size > 2048) {
+                        val it = sentKeys.iterator()
                         if (it.hasNext()) {
                             it.next()
                             it.remove()
                         }
                     }
+                } else {
+                    consecutiveSegFailures += 1
+                    if (headersSent && !writeKeepaliveNullPacket(out)) {
+                        return HlsStreamOutcome(true, headersSent, streamedAny)
+                    }
+                    if (consecutiveSegFailures >= 2) break
                 }
             }
 
-            if (parsedVideo.isVod) break
+            if (parsedVideo.isVod && consecutiveSegFailures == 0) {
+                return HlsStreamOutcome(clientDisconnected = true, headersSent = headersSent, streamedAnySegment = streamedAny)
+            }
 
-            // Polling inteligente: desconta o tempo já gasto transmitindo para nunca secar o buffer da TV!
-            val targetPollMs = (parsedVideo.targetDurationSec.coerceIn(2, 6)) * 550L
-            val elapsedMs = System.currentTimeMillis() - pollStartMs
-            val waitMs = (targetPollMs - elapsedMs).coerceAtLeast(350L)
-            if (!safeSleep(waitMs)) return
+            if (consecutiveSegFailures == 0) {
+                val targetPollMs = (parsedVideo.targetDurationSec.coerceIn(2, 6)) * 500L
+                val elapsedMs = System.currentTimeMillis() - pollStartMs
+                val waitMs = (targetPollMs - elapsedMs).coerceAtLeast(300L)
+                if (!safeSleep(waitMs)) return HlsStreamOutcome(true, headersSent, streamedAny)
+            }
 
             var refreshed: Triple<String, String?, String>? = null
             var pollTry = 0
-            while (running && pollTry < 8 && refreshed == null) {
-                refreshed = refreshVideoAndAudioUrls(videoMediaUrl, audioMediaUrl)
+            val forceMasterNow = staleNoNewSegs >= 5 || consecutiveSegFailures >= 2
+            while (running && pollTry < 20 && refreshed == null) {
+                refreshed = refreshVideoAndAudioUrls(
+                    currentVideoUrl = videoMediaUrl,
+                    currentAudioUrl = audioMediaUrl,
+                    forceMaster = forceMasterNow || pollTry >= 2,
+                )
                 if (refreshed == null) {
                     pollTry += 1
-                    if (!safeSleep(650L)) return
+                    if (headersSent && !writeKeepaliveNullPacket(out)) {
+                        return HlsStreamOutcome(true, headersSent, streamedAny)
+                    }
+                    if (!safeSleep(900L)) return HlsStreamOutcome(true, headersSent, streamedAny)
                 }
             }
             if (refreshed == null) break
             videoMediaUrl = refreshed.first
             audioMediaUrl = refreshed.second
             videoPlaylistText = refreshed.third
+            if (forceMasterNow) {
+                staleNoNewSegs = 0
+            }
         }
+        return HlsStreamOutcome(clientDisconnected = false, headersSent = headersSent, streamedAnySegment = streamedAny)
     }
+
+    private fun segmentDedupeKey(seg: HlsSegment): String =
+        "${seg.sequence}|${seg.url.substringBefore('?')}"
 
     private fun safeSleep(ms: Long): Boolean {
         if (!running) return false
@@ -882,9 +1106,12 @@ private class AndroidDlnaHttpProxy(
     private fun refreshVideoAndAudioUrls(
         currentVideoUrl: String,
         currentAudioUrl: String?,
+        forceMaster: Boolean = false,
     ): Triple<String, String?, String>? {
-        fetchText(currentVideoUrl)?.let { text ->
-            if (text.contains("#EXTM3U")) return Triple(currentVideoUrl, currentAudioUrl, text)
+        if (!forceMaster) {
+            fetchText(currentVideoUrl)?.let { text ->
+                if (text.contains("#EXTM3U")) return Triple(currentVideoUrl, currentAudioUrl, text)
+            }
         }
         // Se a sessão/token da variante expirou, re-resolve a master playlist a partir do defaultUrl!
         val resp = runCatching { openUpstream(defaultUrl, rangeHeader = null) }.getOrNull() ?: return null
@@ -975,6 +1202,22 @@ private class AndroidDlnaHttpProxy(
         if (contentRange.isNullOrBlank()) return null
         val slash = contentRange.substringAfter('/', "").trim()
         return slash.toLongOrNull()
+    }
+
+    private fun parseContentRangeBounds(contentRange: String?): Pair<Long, Long>? {
+        if (contentRange.isNullOrBlank()) return null
+        val match = Regex("""bytes\s+(\d+)-(\d+)/(\d+|\*)""", RegexOption.IGNORE_CASE).find(contentRange) ?: return null
+        val s = match.groupValues[1].toLongOrNull() ?: return null
+        val e = match.groupValues[2].toLongOrNull() ?: return null
+        return s to e
+    }
+
+    private fun parseRequestRangeBounds(rangeHeader: String?): Pair<Long, Long>? {
+        if (rangeHeader.isNullOrBlank()) return null
+        val match = Regex("""bytes=(\d+)-(\d*)""", RegexOption.IGNORE_CASE).find(rangeHeader) ?: return null
+        val s = match.groupValues[1].toLongOrNull() ?: return null
+        val e = match.groupValues[2].toLongOrNull() ?: -1L
+        return s to e
     }
 
     private data class HlsSegment(

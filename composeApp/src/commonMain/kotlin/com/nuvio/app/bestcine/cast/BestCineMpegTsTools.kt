@@ -20,6 +20,18 @@ internal object BestCineMpegTsTools {
     private const val PTS_MODULO = 1L shl 33 // 8589934592 (90 kHz, ~26.5h)
     private const val PTS_MASK = PTS_MODULO - 1L
 
+    /**
+     * Pacote MPEG-TS NULL padrão ISO/IEC 13818-1 (PID 0x1FFF, 188 bytes).
+     * Ignorado pelos decodificadores das Smart TVs, mas mantém a conexão TCP e o
+     * demuxer ativos durante breves reconexões/oscilações de canais Ao Vivo.
+     */
+    val NULL_PACKET: ByteArray = ByteArray(PACKET_SIZE) { 0xFF.toByte() }.apply {
+        this[0] = SYNC_BYTE
+        this[1] = 0x1F.toByte()
+        this[2] = 0xFF.toByte()
+        this[3] = 0x10.toByte()
+    }
+
     private class GrowableByteBuffer(initialCapacity: Int = 4096) {
         private var buf = ByteArray(initialCapacity.coerceAtLeast(256))
         var size: Int = 0
