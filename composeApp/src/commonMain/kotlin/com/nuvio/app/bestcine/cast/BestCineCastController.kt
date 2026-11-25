@@ -63,6 +63,11 @@ object BestCineCastController {
     val supportsSystemScreenCastShortcut: Boolean
         get() = BestCineCastPlatform.supportsSystemScreenCastShortcut
 
+    internal var pendingCastTitle: String? = null
+        private set
+    internal var pendingCastDeviceName: String? = null
+        private set
+
     fun openSystemScreenCastSettings(): Boolean =
         BestCineCastPlatform.openSystemScreenCastSettings()
 
@@ -123,6 +128,8 @@ object BestCineCastController {
                     media.contentType.contains("mpegurl", ignoreCase = true)
 
                 // Sempre tenta proxy local primeiro (resolve DoH, TLS 1.3 para TVs antigas, headers e HLS->TS)
+                pendingCastTitle = media.title.ifBlank { "BestCine" }
+                pendingCastDeviceName = device.friendlyName
                 val proxiedUrl = BestCineCastPlatform.startLocalStreamProxy(
                     sourceUrl = media.url,
                     headers = media.headers,

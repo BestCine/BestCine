@@ -151,6 +151,16 @@ internal actual object BestCineCastPlatform {
         }.getOrNull() ?: return null
         proxyServer = server
         server.start()
+        BestCineAndroidContext.appContext?.let { ctx ->
+            val currentState = BestCineCastController.state.value
+            val mediaTitle = currentState.activeMedia?.title?.takeIf { it.isNotBlank() }
+                ?: BestCineCastController.pendingCastTitle?.takeIf { it.isNotBlank() }
+                ?: "Transmitindo para TV"
+            val devName = currentState.activeDevice?.friendlyName?.takeIf { it.isNotBlank() }
+                ?: BestCineCastController.pendingCastDeviceName?.takeIf { it.isNotBlank() }
+            val subtitle = devName ?: "Smart TV (DLNA)"
+            BestCineCastForegroundService.start(ctx, title = mediaTitle, subtitle = subtitle, isPlaying = true)
+        }
         val ext = when {
             isLive || contentType.contains("mp2t", ignoreCase = true) -> "live.ts"
             contentType.contains("mkv", ignoreCase = true) || contentType.contains("matroska", ignoreCase = true) -> "stream.mkv"
@@ -168,6 +178,9 @@ internal actual object BestCineCastPlatform {
     actual fun stopLocalStreamProxy() {
         proxyServer?.stop()
         proxyServer = null
+        BestCineAndroidContext.appContext?.let { ctx ->
+            BestCineCastForegroundService.stop(ctx)
+        }
     }
 }
 
@@ -257,7 +270,11 @@ private class AndroidDlnaHttpProxy(
     private fun handleClient(client: Socket) {
         receivedAnyRequest.set(true)
         client.use { socket ->
-            socket.soTimeout = 30_000
+            runCatching {
+                socket.tcpNoDelay = true
+                socket.keepAlive = true
+            }
+            socket.soTimeout = 45_000
             val reader = BufferedReader(InputStreamReader(socket.getInputStream(), StandardCharsets.ISO_8859_1))
             val requestLine = reader.readLine() ?: return
             val parts = requestLine.split(' ')

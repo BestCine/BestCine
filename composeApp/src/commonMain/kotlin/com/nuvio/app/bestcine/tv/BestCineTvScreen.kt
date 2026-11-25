@@ -1153,7 +1153,47 @@ private fun BestCineTvSplitPlayerLayout(
                             .background(Color.Black),
                         contentAlignment = Alignment.Center,
                     ) {
-                        if (isSelectedTab && sourceUrl.isNotBlank()) {
+                        val isCastingNow = castState.isCasting || castState.isConnecting
+                        if (isCastingNow) {
+                            // Desmonta o player local enquanto transmite na TV para:
+                            // 1) Nunca sair áudio/vídeo no celular e na TV ao mesmo tempo;
+                            // 2) Liberar a conexão IPTV única (evita congelamentos/travamentos!).
+                            Column(
+                                modifier = Modifier
+                                    .fillMaxSize()
+                                    .background(Color(0xFF0A1020))
+                                    .clickable { showCastDialog = true }
+                                    .padding(18.dp),
+                                horizontalAlignment = Alignment.CenterHorizontally,
+                                verticalArrangement = Arrangement.Center,
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Rounded.CastConnected,
+                                    contentDescription = null,
+                                    tint = BestCineBranding.PrimaryBlueBright,
+                                    modifier = Modifier.size(36.dp),
+                                )
+                                Spacer(modifier = Modifier.height(8.dp))
+                                Text(
+                                    text = if (castState.isConnecting) {
+                                        castState.statusMessage ?: "Conectando à TV..."
+                                    } else {
+                                        "Transmitindo para ${castState.activeDevice?.friendlyName ?: "TV"}"
+                                    },
+                                    style = MaterialTheme.typography.titleSmall,
+                                    color = Color.White,
+                                    fontWeight = FontWeight.Bold,
+                                    textAlign = TextAlign.Center,
+                                )
+                                Spacer(modifier = Modifier.height(4.dp))
+                                Text(
+                                    text = "Toque aqui para pausar, ajustar volume ou parar",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = Color(0xFF94A3B8),
+                                    textAlign = TextAlign.Center,
+                                )
+                            }
+                        } else if (isSelectedTab && sourceUrl.isNotBlank()) {
                             key("${activeChannel.id}|$sourceUrl") {
                                 PlatformPlayerSurface(
                                     sourceUrl = sourceUrl,
@@ -1450,11 +1490,11 @@ private fun BestCineTvSplitPlayerLayout(
                                 verticalArrangement = Arrangement.spacedBy(6.dp),
                             ) {
                                 if (isCompactMobile) {
-                                    // Layout Mobile Compacto: Linha 1 = Nome do Canal + AO VIVO + Fechar
+                                    // Layout Mobile Compacto: Linha 1 = Nome do Canal + AO VIVO + Fechar (X)
                                     Row(
                                         modifier = Modifier.fillMaxWidth(),
                                         verticalAlignment = Alignment.CenterVertically,
-                                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                        horizontalArrangement = Arrangement.spacedBy(6.dp),
                                     ) {
                                         Text(
                                             text = activeChannel.name,
@@ -1476,10 +1516,23 @@ private fun BestCineTvSplitPlayerLayout(
                                                 fontSize = 10.sp,
                                                 fontWeight = FontWeight.Bold,
                                                 color = BestCineBranding.PrimaryBlueBright,
+                                                maxLines = 1,
+                                                softWrap = false,
+                                            )
+                                        }
+                                        IconButton(
+                                            onClick = onClosePlayer,
+                                            modifier = Modifier.size(28.dp),
+                                        ) {
+                                            Icon(
+                                                imageVector = Icons.Rounded.Close,
+                                                contentDescription = "Fechar player",
+                                                tint = tokens.colors.textMuted,
+                                                modifier = Modifier.size(17.dp),
                                             )
                                         }
                                     }
-                                    // Linha 2 Mobile = Botões compactos em 34.dp de altura
+                                    // Linha 2 Mobile = Botões compactos bem espaçados (Tela cheia sem quebrar linha!)
                                     Row(
                                         modifier = Modifier.fillMaxWidth(),
                                         verticalAlignment = Alignment.CenterVertically,
@@ -1487,18 +1540,18 @@ private fun BestCineTvSplitPlayerLayout(
                                     ) {
                                         Row(
                                             verticalAlignment = Alignment.CenterVertically,
-                                            horizontalArrangement = Arrangement.spacedBy(2.dp),
+                                            horizontalArrangement = Arrangement.spacedBy(0.dp),
                                         ) {
                                             IconButton(
                                                 onClick = onPreviousChannel,
                                                 enabled = openingChannelId == null,
-                                                modifier = Modifier.size(34.dp),
+                                                modifier = Modifier.size(32.dp),
                                             ) {
                                                 Icon(
                                                     imageVector = Icons.Rounded.SkipPrevious,
                                                     contentDescription = "Canal anterior",
                                                     tint = tokens.colors.textPrimary,
-                                                    modifier = Modifier.size(20.dp),
+                                                    modifier = Modifier.size(19.dp),
                                                 )
                                             }
                                             IconButton(
@@ -1506,25 +1559,25 @@ private fun BestCineTvSplitPlayerLayout(
                                                     val c = controller ?: return@IconButton
                                                     if (snapshot.isPlaying) c.pause() else c.play()
                                                 },
-                                                modifier = Modifier.size(34.dp),
+                                                modifier = Modifier.size(32.dp),
                                             ) {
                                                 Icon(
                                                     imageVector = if (snapshot.isPlaying) Icons.Rounded.Pause else Icons.Rounded.PlayArrow,
                                                     contentDescription = if (snapshot.isPlaying) "Pausar" else "Reproduzir",
                                                     tint = BestCineBranding.PrimaryBlueBright,
-                                                    modifier = Modifier.size(20.dp),
+                                                    modifier = Modifier.size(19.dp),
                                                 )
                                             }
                                             IconButton(
                                                 onClick = onNextChannel,
                                                 enabled = openingChannelId == null,
-                                                modifier = Modifier.size(34.dp),
+                                                modifier = Modifier.size(32.dp),
                                             ) {
                                                 Icon(
                                                     imageVector = Icons.Rounded.SkipNext,
                                                     contentDescription = "Próximo canal",
                                                     tint = tokens.colors.textPrimary,
-                                                    modifier = Modifier.size(20.dp),
+                                                    modifier = Modifier.size(19.dp),
                                                 )
                                             }
                                             IconButton(
@@ -1532,78 +1585,74 @@ private fun BestCineTvSplitPlayerLayout(
                                                     isMuted = !isMuted
                                                     controller?.setMuted(isMuted)
                                                 },
-                                                modifier = Modifier.size(34.dp),
+                                                modifier = Modifier.size(32.dp),
                                             ) {
                                                 Icon(
                                                     imageVector = if (isMuted) Icons.Rounded.VolumeOff else Icons.Rounded.VolumeUp,
                                                     contentDescription = if (isMuted) "Ativar som" else "Silenciar",
                                                     tint = tokens.colors.textPrimary,
-                                                    modifier = Modifier.size(19.dp),
+                                                    modifier = Modifier.size(18.dp),
                                                 )
                                             }
                                         }
 
                                         Row(
                                             verticalAlignment = Alignment.CenterVertically,
-                                            horizontalArrangement = Arrangement.spacedBy(4.dp),
+                                            horizontalArrangement = Arrangement.spacedBy(2.dp),
                                         ) {
                                             val activeIsFavorite = activeChannel.id in favoriteChannelIds
                                             IconButton(
                                                 onClick = { onToggleFavoriteChannel(activeChannel.id) },
-                                                modifier = Modifier.size(34.dp),
+                                                modifier = Modifier.size(32.dp),
                                             ) {
                                                 Icon(
                                                     imageVector = if (activeIsFavorite) Icons.Rounded.Star else Icons.Rounded.StarBorder,
                                                     contentDescription = if (activeIsFavorite) "Remover favorito" else "Favoritar canal",
                                                     tint = if (activeIsFavorite) Color(0xFFFFCA28) else tokens.colors.textPrimary,
-                                                    modifier = Modifier.size(19.dp),
+                                                    modifier = Modifier.size(18.dp),
                                                 )
                                             }
                                             IconButton(
                                                 onClick = { showCastDialog = true },
-                                                modifier = Modifier.size(34.dp),
+                                                modifier = Modifier.size(32.dp),
                                             ) {
                                                 Icon(
                                                     imageVector = if (castState.isCasting) Icons.Rounded.CastConnected else Icons.Rounded.Cast,
                                                     contentDescription = "Transmitir para TV",
                                                     tint = if (castState.isCasting) BestCineBranding.PrimaryBlueBright else tokens.colors.textPrimary,
-                                                    modifier = Modifier.size(19.dp),
+                                                    modifier = Modifier.size(18.dp),
                                                 )
                                             }
                                             IconButton(
                                                 onClick = { togglePlayerPictureInPicture() },
-                                                modifier = Modifier.size(34.dp),
+                                                modifier = Modifier.size(32.dp),
                                             ) {
                                                 Icon(
                                                     imageVector = Icons.Rounded.PictureInPictureAlt,
                                                     contentDescription = "Picture-in-Picture",
                                                     tint = if (isInPip) BestCineBranding.PrimaryBlueBright else tokens.colors.textPrimary,
-                                                    modifier = Modifier.size(19.dp),
+                                                    modifier = Modifier.size(18.dp),
                                                 )
                                             }
+                                            Spacer(modifier = Modifier.width(2.dp))
                                             Button(
                                                 onClick = onEnterFullscreen,
                                                 shape = RoundedCornerShape(8.dp),
-                                                contentPadding = PaddingValues(horizontal = 10.dp, vertical = 6.dp),
+                                                contentPadding = PaddingValues(horizontal = 9.dp, vertical = 0.dp),
                                                 modifier = Modifier.height(32.dp),
                                                 colors = ButtonDefaults.buttonColors(
                                                     containerColor = BestCineBranding.PrimaryBlue,
                                                     contentColor = Color.White,
                                                 ),
                                             ) {
-                                                Icon(Icons.Rounded.Fullscreen, contentDescription = null, modifier = Modifier.size(16.dp))
+                                                Icon(Icons.Rounded.Fullscreen, contentDescription = null, modifier = Modifier.size(15.dp))
                                                 Spacer(modifier = Modifier.width(4.dp))
-                                                Text("Tela cheia", style = MaterialTheme.typography.labelMedium)
-                                            }
-                                            IconButton(
-                                                onClick = onClosePlayer,
-                                                modifier = Modifier.size(32.dp),
-                                            ) {
-                                                Icon(
-                                                    imageVector = Icons.Rounded.Close,
-                                                    contentDescription = "Fechar player",
-                                                    tint = tokens.colors.textMuted,
-                                                    modifier = Modifier.size(18.dp),
+                                                Text(
+                                                    text = "Tela cheia",
+                                                    style = MaterialTheme.typography.labelSmall,
+                                                    fontWeight = FontWeight.SemiBold,
+                                                    maxLines = 1,
+                                                    softWrap = false,
                                                 )
                                             }
                                         }

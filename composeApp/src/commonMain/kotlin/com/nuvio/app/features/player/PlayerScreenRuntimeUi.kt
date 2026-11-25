@@ -85,6 +85,13 @@ internal fun PlayerScreenRuntime.RenderPlayerRuntimeUi(
     val isInPip = rememberIsInPictureInPicture()
     val castState by BestCineCastController.state.collectAsStateWithLifecycle()
     val castUrl = if (activeTorrentInfoHash != null) p2pResolvedSourceUrl else activeSourceUrl
+    val isCastBlockingLocalPlayback = castState.isCasting || castState.isConnecting
+    LaunchedEffect(isCastBlockingLocalPlayback, playerController) {
+        if (isCastBlockingLocalPlayback) {
+            shouldPlay = false
+            playerController?.pause()
+        }
+    }
     val displayedPositionMs = scrubbingPositionMs ?: playbackSnapshot.positionMs
     val seasonNumber = activeSeasonNumber
     val episodeNumber = activeEpisodeNumber
@@ -636,7 +643,7 @@ internal fun PlayerScreenRuntime.RenderPlayerRuntimeUi(
                 externalSubtitles = surfaceSource?.externalSubtitles.orEmpty(),
                 streamType = surfaceSource?.streamType,
                 modifier = videoModifier,
-                playWhenReady = shouldPlay && sourceAvailable,
+                playWhenReady = shouldPlay && sourceAvailable && !isCastBlockingLocalPlayback,
                 initialPositionMs = surfaceSource?.initialPositionMs,
                 initialPositionRequestKey = surfaceSource?.initialPositionRequestKey,
                 resizeMode = if (partyPanelInset > 0.dp) PlayerResizeMode.Fit else resizeMode,
