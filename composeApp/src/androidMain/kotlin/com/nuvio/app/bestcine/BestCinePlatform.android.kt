@@ -7,6 +7,7 @@ import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Bundle
 import com.nuvio.app.features.addons.AddonHttpClientProvider
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
@@ -100,16 +101,31 @@ internal actual object BestCinePlatformAuth {
     @Volatile
     private var cancelledByUser: Boolean = false
 
+    private fun closeSocketAsync(socket: ServerSocket?) {
+        if (socket == null) return
+        Thread(
+            {
+                runCatching { socket.close() }
+            },
+            "bestcine-auth-socket-close",
+        ).apply {
+            isDaemon = true
+            start()
+        }
+    }
+
     fun deliverDeepLinkCallback(rawUrl: String) {
-        val rawQuery = rawUrl.substringAfter('?', "")
-        if (rawQuery.isBlank()) return
-        val params = parseQuery(rawQuery)
-        val returnedState = params["state"].orEmpty()
-        val returnedCode = params["code"].orEmpty()
-        val expected = activeExpectedState
-        if (!expected.isNullOrBlank() && returnedState == expected && returnedCode.isNotBlank()) {
-            activeCapturedCode?.set(returnedCode)
-            runCatching { activeServerSocket?.close() }
+        runCatching {
+            val rawQuery = rawUrl.substringAfter('?', "")
+            if (rawQuery.isBlank()) return
+            val params = parseQuery(rawQuery)
+            val returnedState = params["state"].orEmpty()
+            val returnedCode = params["code"].orEmpty()
+            val expected = activeExpectedState
+            if (!expected.isNullOrBlank() && returnedState == expected && returnedCode.isNotBlank()) {
+                activeCapturedCode?.compareAndSet(null, returnedCode)
+                closeSocketAsync(activeServerSocket)
+            }
         }
     }
 
@@ -117,16 +133,29 @@ internal actual object BestCinePlatformAuth {
         cancelledByUser = true
         activeExpectedState = null
         activeCapturedCode = null
-        runCatching { activeServerSocket?.close() }
+        val socket = activeServerSocket
         activeServerSocket = null
+        closeSocketAsync(socket)
     }
 
     actual suspend fun launchGoogleLogin(baseUrl: String): BestCineAuthResult = withContext(Dispatchers.IO) {
+        try {
+            launchGoogleLoginInternal(baseUrl)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (t: Throwable) {
+            BestCineAuthResult.Error(
+                "Erro ao concluir login no BestCine: ${t.message ?: t::class.simpleName ?: "erro inesperado"}"
+            )
+        }
+    }
+
+    private suspend fun launchGoogleLoginInternal(baseUrl: String): BestCineAuthResult {
         cancelPendingLogin()
         cancelledByUser = false
 
         val context = BestCineAndroidContext.appContext
-            ?: return@withContext BestCineAuthResult.Error("Contexto Android não inicializado.")
+            ?: return BestCineAuthResult.Error("Contexto Android não inicializado.")
 
         val cleanOrigin = baseUrl.trim().trimEnd('/')
         val expectedState = generateRandomState()
@@ -140,7 +169,7 @@ internal actual object BestCinePlatformAuth {
                 soTimeout = 180_000 // 3 minutos
             }
         }.getOrElse { error ->
-            return@withContext BestCineAuthResult.Error(
+            return BestCineAuthResult.Error(
                 "Não foi possível iniciar o servidor local de login: ${error.message}"
             )
         }
@@ -155,7 +184,7 @@ internal actual object BestCinePlatformAuth {
             activeServerSocket = null
             activeExpectedState = null
             activeCapturedCode = null
-            return@withContext BestCineAuthResult.Error("Não foi possível abrir o navegador do Android.")
+            return BestCineAuthResult.Error("Não foi possível abrir o navegador do Android.")
         }
 
         // Camada tripla de conclusão:
@@ -180,7 +209,7 @@ internal actual object BestCinePlatformAuth {
                                 val text = resp.body?.string().orEmpty()
                                 val parsedPoll = json.decodeFromString<AppPollResponse>(text)
                                 if (parsedPoll.ready && !parsedPoll.code.isNullOrBlank()) {
-                                    capturedCode.set(parsedPoll.code)
+                                    capturedCode.compareAndSet(null, parsedPoll.code)
                                     runCatching { serverSocket.close() }
                                 }
                             }
@@ -196,7 +225,8 @@ internal actual object BestCinePlatformAuth {
                 while (!cancelledByUser && capturedCode.get() == null && callbackError.get() == null) {
                     val remaining = (deadline - System.currentTimeMillis()).toInt()
                     if (remaining <= 0) break
-                    serverSocket.soTimeout = remaining.coerceAtLeast(1_000)
+                    runCatching { serverSocket.soTimeout = remaining.coerceAtLeast(1_000) }
+                        .onFailure { break }
 
                     val client = try {
                         serverSocket.accept()
@@ -206,56 +236,60 @@ internal actual object BestCinePlatformAuth {
                         break
                     }
 
-                    client.use { socket ->
-                        socket.soTimeout = 5_000
-                        val reader = BufferedReader(InputStreamReader(socket.getInputStream(), StandardCharsets.UTF_8))
-                        val requestLine = reader.readLine().orEmpty()
-                        while (true) {
-                            val h = reader.readLine()
-                            if (h.isNullOrEmpty()) break
-                        }
-
-                        val pathAndQuery = requestLine.split(' ').getOrNull(1).orEmpty()
-                        if (pathAndQuery.startsWith("/callback")) {
-                            val rawQuery = pathAndQuery.substringAfter('?', "")
-                            val params = parseQuery(rawQuery)
-                            val returnedState = params["state"].orEmpty()
-                            val returnedCode = params["code"].orEmpty()
-
-                            val isSuccess = returnedState == expectedState && returnedCode.isNotBlank()
-                            if (isSuccess) {
-                                capturedCode.set(returnedCode)
-                            } else {
-                                callbackError.set("Validação de login inválida. Tente novamente pelo aplicativo BestCine.")
+                    // IMPORTANTE: protege contra Broken pipe / Connection reset quando o navegador
+                    // dispara fetch()/Image() para 127.0.0.1 e logo em seguida abre bestcine://!
+                    runCatching {
+                        client.use { socket ->
+                            socket.soTimeout = 5_000
+                            val reader = BufferedReader(InputStreamReader(socket.getInputStream(), StandardCharsets.UTF_8))
+                            val requestLine = reader.readLine().orEmpty()
+                            while (true) {
+                                val h = reader.readLine()
+                                if (h.isNullOrEmpty()) break
                             }
 
-                            val html = buildCallbackHtml(
-                                success = isSuccess,
-                                title = if (isSuccess) "Login concluído no BestCine!" else "Não foi possível validar o login",
-                                message = if (isSuccess) {
-                                    "Sua conta foi autenticada com sucesso. Voltando automaticamente para o aplicativo BestCine..."
-                                } else {
-                                    "Feche esta aba e tente entrar novamente pelo aplicativo BestCine."
-                                },
-                            )
-                            val bodyBytes = html.toByteArray(StandardCharsets.UTF_8)
-                            val statusLine = if (isSuccess) "HTTP/1.1 200 OK" else "HTTP/1.1 400 Bad Request"
-                            val headerBytes = (
-                                "$statusLine\r\n" +
-                                    "Content-Type: text/html; charset=utf-8\r\n" +
-                                    "Cache-Control: no-store\r\n" +
-                                    "Content-Length: ${bodyBytes.size}\r\n" +
-                                    "Connection: close\r\n\r\n"
-                                ).toByteArray(StandardCharsets.UTF_8)
+                            val pathAndQuery = requestLine.split(' ').getOrNull(1).orEmpty()
+                            if (pathAndQuery.startsWith("/callback")) {
+                                val rawQuery = pathAndQuery.substringAfter('?', "")
+                                val params = parseQuery(rawQuery)
+                                val returnedState = params["state"].orEmpty()
+                                val returnedCode = params["code"].orEmpty()
 
-                            val out = socket.getOutputStream()
-                            out.write(headerBytes)
-                            out.write(bodyBytes)
-                            out.flush()
-                        } else {
-                            val notFound = "HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
-                            socket.getOutputStream().write(notFound.toByteArray(StandardCharsets.UTF_8))
-                            socket.getOutputStream().flush()
+                                val isSuccess = returnedState == expectedState && returnedCode.isNotBlank()
+                                if (isSuccess) {
+                                    capturedCode.compareAndSet(null, returnedCode)
+                                } else if (capturedCode.get() == null) {
+                                    callbackError.set("Validação de login inválida. Tente novamente pelo aplicativo BestCine.")
+                                }
+
+                                val html = buildCallbackHtml(
+                                    success = isSuccess,
+                                    title = if (isSuccess) "Login concluído no BestCine!" else "Não foi possível validar o login",
+                                    message = if (isSuccess) {
+                                        "Sua conta foi autenticada com sucesso. Voltando automaticamente para o aplicativo BestCine..."
+                                    } else {
+                                        "Feche esta aba e tente entrar novamente pelo aplicativo BestCine."
+                                    },
+                                )
+                                val bodyBytes = html.toByteArray(StandardCharsets.UTF_8)
+                                val statusLine = if (isSuccess) "HTTP/1.1 200 OK" else "HTTP/1.1 400 Bad Request"
+                                val headerBytes = (
+                                    "$statusLine\r\n" +
+                                        "Content-Type: text/html; charset=utf-8\r\n" +
+                                        "Cache-Control: no-store\r\n" +
+                                        "Content-Length: ${bodyBytes.size}\r\n" +
+                                        "Connection: close\r\n\r\n"
+                                    ).toByteArray(StandardCharsets.UTF_8)
+
+                                val out = socket.getOutputStream()
+                                out.write(headerBytes)
+                                out.write(bodyBytes)
+                                out.flush()
+                            } else {
+                                val notFound = "HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+                                socket.getOutputStream().write(notFound.toByteArray(StandardCharsets.UTF_8))
+                                socket.getOutputStream().flush()
+                            }
                         }
                     }
                 }
@@ -271,15 +305,17 @@ internal actual object BestCinePlatformAuth {
         }
 
         if (cancelledByUser) {
-            return@withContext BestCineAuthResult.Cancelled
+            return BestCineAuthResult.Cancelled
         }
         callbackError.get()?.let { errMsg ->
-            return@withContext BestCineAuthResult.Error(errMsg)
+            if (capturedCode.get().isNullOrBlank()) {
+                return BestCineAuthResult.Error(errMsg)
+            }
         }
 
         val code = capturedCode.get().orEmpty()
         if (code.isBlank()) {
-            return@withContext BestCineAuthResult.Error(
+            return BestCineAuthResult.Error(
                 "Tempo esgotado aguardando o login no navegador. Tente novamente."
             )
         }
@@ -300,7 +336,7 @@ internal actual object BestCinePlatformAuth {
                 body
             }
         }.getOrElse { err ->
-            return@withContext BestCineAuthResult.Error(
+            return BestCineAuthResult.Error(
                 "Falha ao finalizar login no BestCine: ${err.message ?: "erro de conexão"}"
             )
         }
@@ -308,19 +344,19 @@ internal actual object BestCinePlatformAuth {
         val parsed = runCatching {
             json.decodeFromString<BestCineMeResponse>(rawJson)
         }.getOrElse { error ->
-            return@withContext BestCineAuthResult.Error(
+            return BestCineAuthResult.Error(
                 "Resposta inválida do servidor BestCine: ${error.message}"
             )
         }
 
         val user = parsed.usuario
         if (!parsed.logado || user == null || user.tokenInstalacao.isBlank()) {
-            return@withContext BestCineAuthResult.Error(
+            return BestCineAuthResult.Error(
                 "Não foi possível obter os dados da sua conta BestCine."
             )
         }
 
-        BestCineAuthResult.Success(user)
+        return BestCineAuthResult.Success(user)
     }
 
     private fun openAuthInRealBrowser(context: Context, authUrl: String): Boolean {

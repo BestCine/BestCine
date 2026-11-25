@@ -13,6 +13,7 @@ import com.nuvio.app.features.addons.httpGetTextWithHeaders
 import com.nuvio.app.features.addons.httpRequestRaw
 import com.nuvio.app.features.home.HomeCatalogSettingsRepository
 import com.nuvio.app.features.home.HomeRepository
+import kotlinx.coroutines.CoroutineExceptionHandler
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -43,8 +44,19 @@ data class BestCineAccountUiState(
 }
 
 object BestCineAccountRepository {
-    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     private val log = Logger.withTag("BestCineAccount")
+    private val coroutineExceptionHandler = CoroutineExceptionHandler { _, throwable ->
+        log.e(throwable) { "Erro inesperado na corrotina da conta BestCine" }
+        _state.update {
+            it.copy(
+                isLoggingIn = false,
+                isSyncingManifest = false,
+                statusMessage = null,
+                errorMessage = "Erro ao concluir operação da conta: ${throwable.message ?: "tente novamente."}",
+            )
+        }
+    }
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default + coroutineExceptionHandler)
     private val json = Json { ignoreUnknownKeys = true; encodeDefaults = true }
 
     private val _state = MutableStateFlow(BestCineAccountUiState())
