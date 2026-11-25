@@ -1,5 +1,6 @@
 package com.nuvio.app.features.home
 
+import com.nuvio.app.bestcine.catalog.BestCineStreamingCatalogs
 import com.nuvio.app.features.addons.ManagedAddon
 import com.nuvio.app.features.addons.AddonRepository
 import com.nuvio.app.features.addons.enabledAddons
@@ -280,16 +281,25 @@ object HomeRepository {
         serverConnectionId?.let { connectionId -> return toServerSection(connectionId) }
         CustomPosterUrlRepository.ensureLoaded()
         val pattern = CustomPosterUrlRepository.patternForScreen(com.nuvio.app.core.poster.CustomPosterScreen.HOME)
-        val page = fetchLocalizedBuiltinPopularOrNull() ?: if (isDesktop) {
-            fetchDesktopHomePreview(forceRefresh)
-        } else {
-            fetchCatalogPage(
-                manifestUrl = manifestUrl,
-                type = type,
+        val page = if (BestCineStreamingCatalogs.isStreamingManifestUrl(manifestUrl)) {
+            BestCineStreamingCatalogs.fetchHomePreview(
                 catalogId = catalogId,
-                maxItems = HOME_CATALOG_PREVIEW_FETCH_LIMIT,
+                type = type,
+                isDesktop = isDesktop,
                 forceRefresh = forceRefresh,
             )
+        } else {
+            fetchLocalizedBuiltinPopularOrNull() ?: if (isDesktop) {
+                fetchDesktopHomePreview(forceRefresh)
+            } else {
+                fetchCatalogPage(
+                    manifestUrl = manifestUrl,
+                    type = type,
+                    catalogId = catalogId,
+                    maxItems = HOME_CATALOG_PREVIEW_FETCH_LIMIT,
+                    forceRefresh = forceRefresh,
+                )
+            }
         }
         val items = if (pattern.isNotBlank()) page.items.withCustomPosterUrls(pattern) else page.items
         if (items.isEmpty()) {

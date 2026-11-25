@@ -1,5 +1,6 @@
 package com.nuvio.app.features.home
 
+import com.nuvio.app.bestcine.catalog.BestCineStreamingCatalogs
 import com.nuvio.app.core.i18n.localizedMediaTypeLabel
 import com.nuvio.app.features.addons.AddonCatalog
 import com.nuvio.app.features.addons.AddonManifest
@@ -104,7 +105,10 @@ fun buildHomeCatalogDefinitions(addons: List<ManagedAddon>): List<HomeCatalogDef
                 )
             }
     }
-    return (builtinCinemetaDefs + addonDefs).distinctBy(HomeCatalogDefinition::key) + ServerCatalog.homeDefinitions()
+    val streamingDefs = BestCineStreamingCatalogs.buildHomeDefinitions(
+        HomeCatalogSettingsRepository.streamingCatalogConfig(),
+    )
+    return (builtinCinemetaDefs + addonDefs + streamingDefs).distinctBy(HomeCatalogDefinition::key) + ServerCatalog.homeDefinitions()
 }
 
 private fun buildHomeCatalogDescriptorSignature(

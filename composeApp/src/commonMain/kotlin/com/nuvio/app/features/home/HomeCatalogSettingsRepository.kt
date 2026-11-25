@@ -1,5 +1,7 @@
 package com.nuvio.app.features.home
 
+import com.nuvio.app.bestcine.catalog.BestCineStreamingCatalogConfig
+import com.nuvio.app.bestcine.catalog.BestCineStreamingCatalogs
 import com.nuvio.app.features.addons.AddonRepository
 import androidx.compose.ui.text.intl.Locale
 import com.nuvio.app.features.addons.ManagedAddon
@@ -45,6 +47,7 @@ data class HomeCatalogSettingsUiState(
     val showCatalogType: Boolean = true,
     val hideUnreleasedContent: Boolean = false,
     val items: List<HomeCatalogSettingsItem> = emptyList(),
+    val streamingCatalogConfig: BestCineStreamingCatalogConfig = BestCineStreamingCatalogConfig(),
 ) {
     val signature: String
         get() = buildString {
@@ -53,6 +56,8 @@ data class HomeCatalogSettingsUiState(
             append(showCatalogType)
             append('|')
             append(hideUnreleasedContent)
+            append('|')
+            append(streamingCatalogConfig.signature)
             append('|')
             append(
                 items.joinToString(separator = "|") { item ->
@@ -91,6 +96,14 @@ private data class StoredHomeCatalogSettingsPayload(
     val showCatalogType: Boolean = true,
     val hideUnreleasedContent: Boolean = false,
     val items: List<StoredHomeCatalogPreference> = emptyList(),
+    val momentCatalogEnabled: Boolean = true,
+    val seasonalCatalogEnabled: Boolean = true,
+    val runtimeCatalogsEnabled: Boolean = false,
+    val runtimeCatalogIds: List<String> = emptyList(),
+    val streamingCatalogsEnabled: Boolean = false,
+    val streamingCatalogProviders: List<String> = emptyList(),
+    val streamingCatalogIncludeMovies: Boolean = true,
+    val streamingCatalogIncludeSeries: Boolean = true,
 )
 
 object HomeCatalogSettingsRepository {
@@ -127,6 +140,14 @@ object HomeCatalogSettingsRepository {
     private var heroEnabled = true
     private var showCatalogType = true
     private var hideUnreleasedContent = false
+    private var momentCatalogEnabled = true
+    private var seasonalCatalogEnabled = true
+    private var runtimeCatalogsEnabled = false
+    private var runtimeCatalogIds: List<String> = emptyList()
+    private var streamingCatalogsEnabled = false
+    private var streamingCatalogProviders: List<String> = emptyList()
+    private var streamingCatalogIncludeMovies = true
+    private var streamingCatalogIncludeSeries = true
 
     fun onProfileChanged() {
         hasLoaded = false
@@ -134,6 +155,14 @@ object HomeCatalogSettingsRepository {
         heroEnabled = true
         showCatalogType = true
         hideUnreleasedContent = false
+        momentCatalogEnabled = true
+        seasonalCatalogEnabled = true
+        runtimeCatalogsEnabled = false
+        runtimeCatalogIds = emptyList()
+        streamingCatalogsEnabled = false
+        streamingCatalogProviders = emptyList()
+        streamingCatalogIncludeMovies = true
+        streamingCatalogIncludeSeries = true
         definitions = emptyList()
         collectionDefinitions = emptyList()
         snapshotRef.value = emptySnapshot
@@ -153,6 +182,14 @@ object HomeCatalogSettingsRepository {
         heroEnabled = true
         showCatalogType = true
         hideUnreleasedContent = false
+        momentCatalogEnabled = true
+        seasonalCatalogEnabled = true
+        runtimeCatalogsEnabled = false
+        runtimeCatalogIds = emptyList()
+        streamingCatalogsEnabled = false
+        streamingCatalogProviders = emptyList()
+        streamingCatalogIncludeMovies = true
+        streamingCatalogIncludeSeries = true
         snapshotRef.value = emptySnapshot
         lastPersistedPayload = null
         _uiState.value = HomeCatalogSettingsUiState()
@@ -208,8 +245,10 @@ object HomeCatalogSettingsRepository {
                 val isPrimaryCatalog = key in primaryKeySet
                 val isCollection = collectionDefinitions.any { it.key == key }
                 val isTvCatalog = key in tvCatalogKeys
+                val isStreamingCatalog = BestCineStreamingCatalogs.isStreamingKey(key)
                 val heroEnabledForItem = when {
                     isCollection || isTvCatalog -> false
+                    isStreamingCatalog -> existing?.heroSourceEnabled == true && heroCount < HERO_SOURCE_SELECTION_LIMIT
                     isPrimaryCatalog -> heroCount < HERO_SOURCE_SELECTION_LIMIT
                     existing != null -> existing.heroSourceEnabled && heroCount < HERO_SOURCE_SELECTION_LIMIT
                     else -> heroCount < HERO_SOURCE_SELECTION_LIMIT
@@ -236,7 +275,13 @@ object HomeCatalogSettingsRepository {
     private fun syncCatalogsInternal(addons: List<ManagedAddon>) {
         ensureLoaded()
         val collections = CollectionRepository.collections.value
-        val syncInput = CatalogSyncInput(addons, collections, Locale.current.toLanguageTag(), ServerRepository.uiState.value.revision)
+        val syncInput = CatalogSyncInput(
+            addons = addons,
+            collections = collections,
+            locale = Locale.current.toLanguageTag(),
+            serverRevision = ServerRepository.uiState.value.revision,
+            streamingSignature = currentStreamingCatalogConfig().signature,
+        )
         if (lastCatalogSync == syncInput) return
         definitions = buildHomeCatalogDefinitions(addons)
         collectionDefinitions = buildCollectionDefinitions(collections)
@@ -341,16 +386,137 @@ object HomeCatalogSettingsRepository {
         }
     }
 
+    fun streamingCatalogConfig(): BestCineStreamingCatalogConfig {
+        ensureLoaded()
+        return currentStreamingCatalogConfig()
+    }
+
+    private fun currentStreamingCatalogConfig(): BestCineStreamingCatalogConfig =
+        BestCineStreamingCatalogConfig(
+            momentCatalogEnabled = momentCatalogEnabled,
+            seasonalCatalogEnabled = seasonalCatalogEnabled,
+            runtimeCatalogsEnabled = runtimeCatalogsEnabled,
+            selectedRuntimeIds = runtimeCatalogIds,
+            enabled = streamingCatalogsEnabled,
+            selectedProviderIds = streamingCatalogProviders,
+            includeMovies = streamingCatalogIncludeMovies,
+            includeSeries = streamingCatalogIncludeSeries,
+        )
+
+    fun setMomentCatalogEnabled(enabled: Boolean) {
+        ensureLoaded()
+        if (momentCatalogEnabled == enabled) return
+        momentCatalogEnabled = enabled
+        applyStreamingCatalogConfigChange()
+    }
+
+    fun setSeasonalCatalogEnabled(enabled: Boolean) {
+        ensureLoaded()
+        if (seasonalCatalogEnabled == enabled) return
+        seasonalCatalogEnabled = enabled
+        applyStreamingCatalogConfigChange()
+    }
+
+    fun setRuntimeCatalogsEnabled(enabled: Boolean) {
+        ensureLoaded()
+        if (runtimeCatalogsEnabled == enabled) return
+        runtimeCatalogsEnabled = enabled
+        if (enabled && runtimeCatalogIds.isEmpty()) {
+            runtimeCatalogIds = BestCineStreamingCatalogs.defaultRuntimeIds
+        }
+        applyStreamingCatalogConfigChange()
+    }
+
+    fun toggleRuntimeCatalog(runtimeId: String) {
+        ensureLoaded()
+        val normalizedId = runtimeId.trim().lowercase()
+        if (BestCineStreamingCatalogs.runtimeCatalogById(normalizedId) == null) return
+        val next = if (normalizedId in runtimeCatalogIds) {
+            runtimeCatalogIds.filterNot { it == normalizedId }
+        } else {
+            BestCineStreamingCatalogs.normalizeRuntimeIds(runtimeCatalogIds + normalizedId)
+        }
+        if (next == runtimeCatalogIds) return
+        runtimeCatalogIds = next
+        applyStreamingCatalogConfigChange()
+    }
+
+    fun setStreamingCatalogsEnabled(enabled: Boolean) {
+        ensureLoaded()
+        if (streamingCatalogsEnabled == enabled) return
+        streamingCatalogsEnabled = enabled
+        if (enabled && streamingCatalogProviders.isEmpty()) {
+            streamingCatalogProviders = BestCineStreamingCatalogs.defaultStarterProviderIds
+        }
+        applyStreamingCatalogConfigChange()
+    }
+
+    fun toggleStreamingProvider(providerId: String) {
+        ensureLoaded()
+        val normalizedId = providerId.trim().lowercase()
+        if (BestCineStreamingCatalogs.providerById(normalizedId) == null) return
+        val next = if (normalizedId in streamingCatalogProviders) {
+            streamingCatalogProviders.filterNot { it == normalizedId }
+        } else {
+            BestCineStreamingCatalogs.normalizeProviderIds(streamingCatalogProviders + normalizedId)
+        }
+        if (next == streamingCatalogProviders) return
+        streamingCatalogProviders = next
+        applyStreamingCatalogConfigChange()
+    }
+
+    fun setStreamingIncludeMovies(enabled: Boolean) {
+        ensureLoaded()
+        if (streamingCatalogIncludeMovies == enabled) return
+        streamingCatalogIncludeMovies = enabled
+        if (!streamingCatalogIncludeMovies && !streamingCatalogIncludeSeries) {
+            streamingCatalogIncludeSeries = true
+        }
+        applyStreamingCatalogConfigChange()
+    }
+
+    fun setStreamingIncludeSeries(enabled: Boolean) {
+        ensureLoaded()
+        if (streamingCatalogIncludeSeries == enabled) return
+        streamingCatalogIncludeSeries = enabled
+        if (!streamingCatalogIncludeMovies && !streamingCatalogIncludeSeries) {
+            streamingCatalogIncludeMovies = true
+        }
+        applyStreamingCatalogConfigChange()
+    }
+
+    private fun applyStreamingCatalogConfigChange() {
+        val enabledAddons = AddonRepository.uiState.value.addons.enabledAddons()
+        definitions = buildHomeCatalogDefinitions(enabledAddons)
+        lastCatalogSync = null
+        normalizePreferences()
+        enforcePinnedCollectionsAtTop()
+        publish()
+        persist()
+        HomeRepository.refresh(enabledAddons, force = false)
+    }
+
     fun resetToDefaults() {
         ensureLoaded()
         heroEnabled = true
         showCatalogType = true
         hideUnreleasedContent = false
+        momentCatalogEnabled = true
+        seasonalCatalogEnabled = true
+        runtimeCatalogsEnabled = false
+        runtimeCatalogIds = emptyList()
+        streamingCatalogsEnabled = false
+        streamingCatalogProviders = emptyList()
+        streamingCatalogIncludeMovies = true
+        streamingCatalogIncludeSeries = true
         preferences = emptyMap()
+        val enabledAddons = AddonRepository.uiState.value.addons.enabledAddons()
+        definitions = buildHomeCatalogDefinitions(enabledAddons)
+        lastCatalogSync = null
         normalizePreferences()
         publish()
         persist()
-        HomeRepository.applyCurrentSettings()
+        HomeRepository.refresh(enabledAddons, force = false)
         HomeCatalogSettingsSyncService.triggerPush()
     }
 
@@ -398,6 +564,17 @@ object HomeCatalogSettingsRepository {
             heroEnabled = parsedPayload.heroEnabled
             showCatalogType = parsedPayload.showCatalogType
             hideUnreleasedContent = parsedPayload.hideUnreleasedContent
+            momentCatalogEnabled = parsedPayload.momentCatalogEnabled
+            seasonalCatalogEnabled = parsedPayload.seasonalCatalogEnabled
+            runtimeCatalogsEnabled = parsedPayload.runtimeCatalogsEnabled
+            runtimeCatalogIds = BestCineStreamingCatalogs.normalizeRuntimeIds(parsedPayload.runtimeCatalogIds)
+            streamingCatalogsEnabled = parsedPayload.streamingCatalogsEnabled
+            streamingCatalogProviders = BestCineStreamingCatalogs.normalizeProviderIds(parsedPayload.streamingCatalogProviders)
+            streamingCatalogIncludeMovies = parsedPayload.streamingCatalogIncludeMovies
+            streamingCatalogIncludeSeries = parsedPayload.streamingCatalogIncludeSeries
+            if (!streamingCatalogIncludeMovies && !streamingCatalogIncludeSeries) {
+                streamingCatalogIncludeMovies = true
+            }
             preferences = parsedPayload.items.associateBy { it.key }
             publish()
             return
@@ -443,10 +620,11 @@ object HomeCatalogSettingsRepository {
         orderedEntries.forEach { entry ->
             val stored = current[entry.key]
             val isTvCatalog = entry.key in tvCatalogKeys
+            val isStreamingCatalog = BestCineStreamingCatalogs.isStreamingKey(entry.key)
             val heroSourceEnabled = if (entry.isCollection || isTvCatalog) {
                 false
             } else {
-                (stored?.heroSourceEnabled ?: true) &&
+                (stored?.heroSourceEnabled ?: !isStreamingCatalog) &&
                     enabledHeroSourceCount < HERO_SOURCE_SELECTION_LIMIT
             }
             if (heroSourceEnabled) {
@@ -515,6 +693,7 @@ object HomeCatalogSettingsRepository {
             showCatalogType = showCatalogType,
             hideUnreleasedContent = hideUnreleasedContent,
             items = items,
+            streamingCatalogConfig = currentStreamingCatalogConfig(),
         )
         if (_uiState.value != nextState) _uiState.value = nextState
     }
@@ -526,6 +705,14 @@ object HomeCatalogSettingsRepository {
                 showCatalogType = showCatalogType,
                 hideUnreleasedContent = hideUnreleasedContent,
                 items = preferences.values.sortedBy { it.order },
+                momentCatalogEnabled = momentCatalogEnabled,
+                seasonalCatalogEnabled = seasonalCatalogEnabled,
+                runtimeCatalogsEnabled = runtimeCatalogsEnabled,
+                runtimeCatalogIds = runtimeCatalogIds,
+                streamingCatalogsEnabled = streamingCatalogsEnabled,
+                streamingCatalogProviders = streamingCatalogProviders,
+                streamingCatalogIncludeMovies = streamingCatalogIncludeMovies,
+                streamingCatalogIncludeSeries = streamingCatalogIncludeSeries,
             ),
         )
         if (payload == lastPersistedPayload) return
@@ -592,7 +779,10 @@ object HomeCatalogSettingsRepository {
         ensureLoaded()
         val catalogDefinitionsByKey = definitions.associateBy { it.key }
         val collectionDefinitionsByKey = collectionDefinitions.associateBy { it.key }
-        val items = preferences.values.filterNot { ServerCatalog.isServerKey(it.key) }.sortedBy { it.order }.map { pref ->
+        val items = preferences.values
+            .filterNot { ServerCatalog.isServerKey(it.key) || BestCineStreamingCatalogs.isStreamingKey(it.key) }
+            .sortedBy { it.order }
+            .map { pref ->
             val catalogDefinition = catalogDefinitionsByKey[pref.key]
             val collectionDefinition = collectionDefinitionsByKey[pref.key]
             val isCollection = collectionDefinition != null || pref.key.startsWith("collection_")
@@ -759,4 +949,5 @@ private data class CatalogSyncInput(
     val collections: List<Collection>,
     val locale: String,
     val serverRevision: Int,
+    val streamingSignature: String,
 )

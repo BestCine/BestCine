@@ -2,10 +2,14 @@ package com.nuvio.app.features.settings
 
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.animateDpAsState
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
@@ -15,7 +19,10 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListScope
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.Check
 import androidx.compose.material.icons.rounded.KeyboardArrowDown
 import androidx.compose.material.icons.rounded.KeyboardArrowUp
 import androidx.compose.material3.Icon
@@ -30,13 +37,20 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.nuvio.app.bestcine.catalog.BestCineStreamingCatalogConfig
+import com.nuvio.app.bestcine.catalog.BestCineStreamingCatalogs
+import com.nuvio.app.bestcine.catalog.BestCineStreamingProvider
 import com.nuvio.app.core.ui.NuvioActionLabel
 import com.nuvio.app.core.ui.NuvioLoadingIndicator
 import com.nuvio.app.core.ui.NuvioToastController
+import com.nuvio.app.core.ui.nuvio
 import com.nuvio.app.features.addons.AddonRepository
 import com.nuvio.app.features.home.HomeCatalogSettingsItem
 import com.nuvio.app.features.home.HomeCatalogSettingsRepository
@@ -137,6 +151,18 @@ internal fun LazyListScope.homescreenSettingsContent(
                     onExpandedChange = { heroSourcesExpanded = it },
                 )
             }
+        }
+    }
+    item(key = "bestcine_streaming_catalogs_br") {
+        val settingsUiState by HomeCatalogSettingsRepository.uiState.collectAsStateWithLifecycle()
+        SettingsSection(
+            title = "Catálogos BestCine (Brasil)",
+            isTablet = isTablet,
+        ) {
+            BestCineStreamingCatalogsSectionCard(
+                isTablet = isTablet,
+                config = settingsUiState.streamingCatalogConfig,
+            )
         }
     }
     item {
@@ -368,6 +394,255 @@ private fun HomescreenCatalogList(
                         }
                     }
                 }
+            }
+        }
+    }
+}
+
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun BestCineStreamingCatalogsSectionCard(
+    isTablet: Boolean,
+    config: BestCineStreamingCatalogConfig,
+) {
+    val tokens = MaterialTheme.nuvio
+    val currentMoment = remember { BestCineStreamingCatalogs.currentMomentPeriod() }
+    val currentSeasonal = remember { BestCineStreamingCatalogs.currentSeasonalEvent() }
+    val selectedRuntimeSet = remember(config.selectedRuntimeIds) { config.selectedRuntimeIds.toSet() }
+    val selectedSet = remember(config.selectedProviderIds) { config.selectedProviderIds.toSet() }
+    val typesMultiplier = (if (config.includeMovies) 1 else 0) + (if (config.includeSeries) 1 else 0)
+    val activeRowCount = if (config.enabled) selectedSet.size * typesMultiplier else 0
+
+    SettingsGroup(isTablet = isTablet) {
+        SettingsSwitchRow(
+            title = "Sessão do Momento (Dinâmico por Horário)",
+            description = "Agora: ${currentMoment.label} (${currentMoment.subtitle}). Muda automaticamente entre Manhã, Tarde, Noite e Madrugada.",
+            checked = config.momentCatalogEnabled,
+            isTablet = isTablet,
+            onCheckedChange = HomeCatalogSettingsRepository::setMomentCatalogEnabled,
+        )
+        SettingsGroupDivider(isTablet = isTablet)
+        SettingsSwitchRow(
+            title = "Catálogo Sazonal Automático",
+            description = if (currentSeasonal != null) {
+                "Ativo hoje: ${currentSeasonal.title} (${currentSeasonal.subtitle}). Aparece automaticamente em Natal, Halloween, Dia das Mães, Pais, Namorados, Crianças e Férias."
+            } else {
+                "Aparece só perto de datas comemorativas (Natal, Halloween, Dia das Mães, Pais, Namorados, Crianças e Férias). Fora de época não consome rede."
+            },
+            checked = config.seasonalCatalogEnabled,
+            isTablet = isTablet,
+            onCheckedChange = HomeCatalogSettingsRepository::setSeasonalCatalogEnabled,
+        )
+        SettingsGroupDivider(isTablet = isTablet)
+        SettingsSwitchRow(
+            title = "Catálogos por Tempo / Duração",
+            description = "Fileiras opcionais por duração: filmes rápidos (até 90 min), minisséries curtas e épicos (+2h30).",
+            checked = config.runtimeCatalogsEnabled,
+            isTablet = isTablet,
+            onCheckedChange = HomeCatalogSettingsRepository::setRuntimeCatalogsEnabled,
+        )
+        AnimatedVisibility(visible = config.runtimeCatalogsEnabled) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(start = 16.dp, end = 16.dp, bottom = 14.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+                FlowRow(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    BestCineStreamingCatalogs.allRuntimeCatalogs.forEach { runtime ->
+                        StreamingTogglePill(
+                            label = runtime.displayName,
+                            selected = runtime.id in selectedRuntimeSet,
+                            accentColor = Color(runtime.accentHex),
+                            showAccentDot = true,
+                            onClick = { HomeCatalogSettingsRepository.toggleRuntimeCatalog(runtime.id) },
+                        )
+                    }
+                }
+            }
+        }
+        SettingsGroupDivider(isTablet = isTablet)
+        SettingsSwitchRow(
+            title = "Ativar catálogos por streaming",
+            description = "Adiciona fileiras opcionais de plataformas do Brasil via TMDB. Desativado por padrão para desempenho máximo.",
+            checked = config.enabled,
+            isTablet = isTablet,
+            onCheckedChange = HomeCatalogSettingsRepository::setStreamingCatalogsEnabled,
+        )
+
+        AnimatedVisibility(visible = config.enabled) {
+            Column {
+                SettingsGroupDivider(isTablet = isTablet)
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp, vertical = 14.dp),
+                    verticalArrangement = Arrangement.spacedBy(12.dp),
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Text(
+                            text = "Tipos de catálogo",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurface,
+                            fontWeight = FontWeight.Medium,
+                        )
+                        Text(
+                            text = when (activeRowCount) {
+                                0 -> "Nenhuma fileira ativa"
+                                1 -> "1 fileira ativa"
+                                else -> "$activeRowCount fileiras ativas"
+                            },
+                            style = MaterialTheme.typography.bodySmall,
+                            color = if (activeRowCount > 8) Color(0xFFF59E0B) else MaterialTheme.colorScheme.onSurfaceVariant,
+                            fontWeight = FontWeight.Medium,
+                        )
+                    }
+
+                    FlowRow(
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        StreamingTogglePill(
+                            label = "Filmes",
+                            selected = config.includeMovies,
+                            accentColor = MaterialTheme.colorScheme.primary,
+                            onClick = { HomeCatalogSettingsRepository.setStreamingIncludeMovies(!config.includeMovies) },
+                        )
+                        StreamingTogglePill(
+                            label = "Séries",
+                            selected = config.includeSeries,
+                            accentColor = MaterialTheme.colorScheme.primary,
+                            onClick = { HomeCatalogSettingsRepository.setStreamingIncludeSeries(!config.includeSeries) },
+                        )
+                    }
+                }
+
+                SettingsGroupDivider(isTablet = isTablet)
+
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp, vertical = 14.dp),
+                    verticalArrangement = Arrangement.spacedBy(12.dp),
+                ) {
+                    Text(
+                        text = "Escolha as plataformas",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurface,
+                        fontWeight = FontWeight.Medium,
+                    )
+
+                    FlowRow(
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        BestCineStreamingCatalogs.allProviders.forEach { provider ->
+                            val isSelected = provider.id in selectedSet
+                            StreamingProviderChip(
+                                provider = provider,
+                                selected = isSelected,
+                                onClick = { HomeCatalogSettingsRepository.toggleStreamingProvider(provider.id) },
+                            )
+                        }
+                    }
+
+                    Text(
+                        text = if (activeRowCount > 8) {
+                            "Dica: manter entre 3 e 6 fileiras ativas garante abertura instantânea e menor uso de memória."
+                        } else {
+                            "As fileiras ativadas aparecem automaticamente na Tela Inicial e na lista abaixo para reordenar ou renomear."
+                        },
+                        style = MaterialTheme.typography.bodySmall,
+                        color = if (activeRowCount > 8) Color(0xFFF59E0B) else tokens.colors.textSecondary,
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun StreamingProviderChip(
+    provider: BestCineStreamingProvider,
+    selected: Boolean,
+    onClick: () -> Unit,
+) {
+    val accent = Color(provider.accentHex)
+    StreamingTogglePill(
+        label = provider.displayName,
+        selected = selected,
+        accentColor = accent,
+        showAccentDot = true,
+        onClick = onClick,
+    )
+}
+
+@Composable
+private fun StreamingTogglePill(
+    label: String,
+    selected: Boolean,
+    accentColor: Color,
+    showAccentDot: Boolean = false,
+    onClick: () -> Unit,
+) {
+    val tokens = MaterialTheme.nuvio
+    val containerColor = if (selected) {
+        accentColor.copy(alpha = 0.18f)
+    } else {
+        tokens.colors.surfaceElevated
+    }
+    val borderColor = if (selected) {
+        accentColor.copy(alpha = 0.72f)
+    } else {
+        tokens.colors.borderSubtle
+    }
+    val contentColor = if (selected) {
+        MaterialTheme.colorScheme.onSurface
+    } else {
+        MaterialTheme.colorScheme.onSurfaceVariant
+    }
+
+    Surface(
+        modifier = Modifier
+            .clip(RoundedCornerShape(999.dp))
+            .clickable(onClick = onClick),
+        shape = RoundedCornerShape(999.dp),
+        color = containerColor,
+        border = BorderStroke(1.dp, borderColor),
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = 13.dp, vertical = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(7.dp),
+        ) {
+            if (showAccentDot) {
+                Box(
+                    modifier = Modifier
+                        .size(8.dp)
+                        .clip(CircleShape)
+                        .background(accentColor),
+                )
+            }
+            Text(
+                text = label,
+                style = MaterialTheme.typography.bodySmall,
+                color = contentColor,
+                fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Medium,
+            )
+            if (selected) {
+                Icon(
+                    imageVector = Icons.Rounded.Check,
+                    contentDescription = null,
+                    modifier = Modifier.size(14.dp),
+                    tint = accentColor,
+                )
             }
         }
     }

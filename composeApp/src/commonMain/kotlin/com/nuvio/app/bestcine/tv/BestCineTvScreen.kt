@@ -17,6 +17,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -33,6 +34,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBars
 import androidx.compose.foundation.layout.width
@@ -48,8 +50,10 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.Fullscreen
+import androidx.compose.material.icons.rounded.FullscreenExit
 import androidx.compose.material.icons.rounded.GridView
 import androidx.compose.material.icons.rounded.LiveTv
 import androidx.compose.material.icons.rounded.Pause
@@ -91,6 +95,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.IntSize
@@ -1287,9 +1292,104 @@ private fun BestCineTvSplitPlayerLayout(
                                         },
                                         style = MaterialTheme.typography.bodySmall,
                                         color = tokens.colors.textMuted,
+                                        textAlign = TextAlign.Center,
                                     )
+                                    if (isFullscreen) {
+                                        Spacer(modifier = Modifier.height(6.dp))
+                                        Button(
+                                            onClick = onExitFullscreen,
+                                            shape = RoundedCornerShape(10.dp),
+                                            colors = ButtonDefaults.buttonColors(
+                                                containerColor = BestCineBranding.PrimaryBlue,
+                                                contentColor = Color.White,
+                                            ),
+                                        ) {
+                                            Icon(
+                                                imageVector = Icons.Rounded.FullscreenExit,
+                                                contentDescription = null,
+                                                modifier = Modifier.size(18.dp),
+                                            )
+                                            Spacer(modifier = Modifier.width(6.dp))
+                                            Text("Sair da tela cheia")
+                                        }
+                                    }
                                 }
                             }
+                        } else if (!isDesktop && isFullscreen && !isInPip) {
+                            BestCineTvMobileFullscreenOverlay(
+                                channelName = activeChannel.name,
+                                programTitle = activeEpgDetails?.nowWindow?.title
+                                    ?: activeChannel.epgWindow?.title
+                                    ?: activeChannel.group,
+                                isPlaying = snapshot.isPlaying,
+                                isLoading = snapshot.isLoading,
+                                isMuted = isMuted,
+                                isFavorite = activeChannel.id in favoriteChannelIds,
+                                controlsVisible = playerControlsVisible,
+                                resizeModeLabel = resizeModeLabel,
+                                activeStreams = activeStreams,
+                                activeStreamIndex = activeStreamIndex,
+                                openingChannelId = openingChannelId,
+                                onToggleControls = {
+                                    playerControlsVisible = !playerControlsVisible
+                                    if (playerControlsVisible) {
+                                        controlsActivityTick += 1
+                                    }
+                                },
+                                onUserActivity = {
+                                    playerControlsVisible = true
+                                    controlsActivityTick += 1
+                                },
+                                onTogglePlayPause = {
+                                    val c = controller
+                                    if (c != null) {
+                                        if (snapshot.isPlaying) c.pause() else c.play()
+                                    }
+                                    playerControlsVisible = true
+                                    controlsActivityTick += 1
+                                },
+                                onPreviousChannel = {
+                                    playerControlsVisible = true
+                                    controlsActivityTick += 1
+                                    onPreviousChannel()
+                                },
+                                onNextChannel = {
+                                    playerControlsVisible = true
+                                    controlsActivityTick += 1
+                                    onNextChannel()
+                                },
+                                onToggleMute = {
+                                    val nextMuted = !isMuted
+                                    isMuted = nextMuted
+                                    controller?.setMuted(nextMuted)
+                                    playerControlsVisible = true
+                                    controlsActivityTick += 1
+                                },
+                                onToggleFavorite = {
+                                    onToggleFavoriteChannel(activeChannel.id)
+                                    playerControlsVisible = true
+                                    controlsActivityTick += 1
+                                },
+                                onCycleResizeMode = {
+                                    resizeMode = when (resizeMode) {
+                                        PlayerResizeMode.Fit -> PlayerResizeMode.Fill
+                                        PlayerResizeMode.Fill -> PlayerResizeMode.Zoom
+                                        PlayerResizeMode.Zoom -> PlayerResizeMode.Stretch
+                                        PlayerResizeMode.Stretch -> PlayerResizeMode.Fit
+                                    }
+                                    playerControlsVisible = true
+                                    controlsActivityTick += 1
+                                },
+                                onSelectSourceIndex = { idx ->
+                                    onSelectSourceIndex(idx)
+                                    playerControlsVisible = true
+                                    controlsActivityTick += 1
+                                },
+                                onTogglePip = {
+                                    togglePlayerPictureInPicture()
+                                },
+                                onExitFullscreen = onExitFullscreen,
+                            )
                         }
                     } else {
                         Text(
@@ -2066,5 +2166,316 @@ private fun BestCineEpgProgressBar(
             color = tokens.colors.textMuted,
             maxLines = 1,
         )
+    }
+}
+
+@Composable
+private fun BestCineTvMobileFullscreenOverlay(
+    channelName: String,
+    programTitle: String,
+    isPlaying: Boolean,
+    isLoading: Boolean,
+    isMuted: Boolean,
+    isFavorite: Boolean,
+    controlsVisible: Boolean,
+    resizeModeLabel: String,
+    activeStreams: List<StreamItem>,
+    activeStreamIndex: Int,
+    openingChannelId: String?,
+    onToggleControls: () -> Unit,
+    onUserActivity: () -> Unit,
+    onTogglePlayPause: () -> Unit,
+    onPreviousChannel: () -> Unit,
+    onNextChannel: () -> Unit,
+    onToggleMute: () -> Unit,
+    onToggleFavorite: () -> Unit,
+    onCycleResizeMode: () -> Unit,
+    onSelectSourceIndex: (Int) -> Unit,
+    onTogglePip: () -> Unit,
+    onExitFullscreen: () -> Unit,
+) {
+    val safePadding = WindowInsets.safeDrawing.asPaddingValues()
+
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .clickable(
+                interactionSource = remember { MutableInteractionSource() },
+                indication = null,
+                onClick = onToggleControls,
+            ),
+    ) {
+        AnimatedVisibility(
+            visible = controlsVisible,
+            enter = fadeIn(tween(180)),
+            exit = fadeOut(tween(180)),
+            modifier = Modifier.fillMaxSize(),
+        ) {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(
+                        Brush.verticalGradient(
+                            colorStops = arrayOf(
+                                0.0f to Color.Black.copy(alpha = 0.72f),
+                                0.30f to Color.Black.copy(alpha = 0.18f),
+                                0.70f to Color.Black.copy(alpha = 0.18f),
+                                1.0f to Color.Black.copy(alpha = 0.78f),
+                            ),
+                        ),
+                    )
+                    .padding(safePadding)
+                    .padding(horizontal = 18.dp, vertical = 12.dp),
+            ) {
+                // Topo: Voltar + Nome do Canal + AO VIVO + Favoritar
+                Row(
+                    modifier = Modifier
+                        .align(Alignment.TopCenter)
+                        .fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                ) {
+                    IconButton(
+                        onClick = onExitFullscreen,
+                        modifier = Modifier
+                            .size(40.dp)
+                            .clip(CircleShape)
+                            .background(Color.Black.copy(alpha = 0.50f)),
+                    ) {
+                        Icon(
+                            imageVector = Icons.AutoMirrored.Rounded.ArrowBack,
+                            contentDescription = "Sair da tela cheia",
+                            tint = Color.White,
+                            modifier = Modifier.size(22.dp),
+                        )
+                    }
+
+                    Column(modifier = Modifier.weight(1f)) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        ) {
+                            Text(
+                                text = channelName,
+                                style = MaterialTheme.typography.titleMedium,
+                                color = Color.White,
+                                fontWeight = FontWeight.Bold,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                                modifier = Modifier.weight(1f, fill = false),
+                            )
+                            Box(
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(6.dp))
+                                    .background(Color(0xFFEF4444).copy(alpha = 0.90f))
+                                    .padding(horizontal = 7.dp, vertical = 2.dp),
+                            ) {
+                                Text(
+                                    text = "AO VIVO",
+                                    fontSize = 10.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = Color.White,
+                                )
+                            }
+                        }
+                        if (programTitle.isNotBlank()) {
+                            Text(
+                                text = programTitle,
+                                style = MaterialTheme.typography.bodySmall,
+                                color = Color.White.copy(alpha = 0.78f),
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                        }
+                    }
+
+                    IconButton(
+                        onClick = onToggleFavorite,
+                        modifier = Modifier
+                            .size(40.dp)
+                            .clip(CircleShape)
+                            .background(Color.Black.copy(alpha = 0.50f)),
+                    ) {
+                        Icon(
+                            imageVector = if (isFavorite) Icons.Rounded.Star else Icons.Rounded.StarBorder,
+                            contentDescription = if (isFavorite) "Remover favorito" else "Favoritar canal",
+                            tint = if (isFavorite) Color(0xFFFFCA28) else Color.White,
+                            modifier = Modifier.size(22.dp),
+                        )
+                    }
+                }
+
+                // Centro: Canal anterior · Play/Pause · Próximo canal
+                Row(
+                    modifier = Modifier.align(Alignment.Center),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(28.dp),
+                ) {
+                    IconButton(
+                        onClick = onPreviousChannel,
+                        enabled = openingChannelId == null,
+                        modifier = Modifier
+                            .size(48.dp)
+                            .clip(CircleShape)
+                            .background(Color.Black.copy(alpha = 0.52f)),
+                    ) {
+                        Icon(
+                            imageVector = Icons.Rounded.SkipPrevious,
+                            contentDescription = "Canal anterior",
+                            tint = Color.White,
+                            modifier = Modifier.size(28.dp),
+                        )
+                    }
+
+                    Box(
+                        modifier = Modifier
+                            .size(64.dp)
+                            .clip(CircleShape)
+                            .background(BestCineBranding.PrimaryBlue.copy(alpha = 0.92f))
+                            .clickable(onClick = onTogglePlayPause),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        if (isLoading || openingChannelId != null) {
+                            NuvioLoadingIndicator(size = 28.dp, color = Color.White)
+                        } else {
+                            Icon(
+                                imageVector = if (isPlaying) Icons.Rounded.Pause else Icons.Rounded.PlayArrow,
+                                contentDescription = if (isPlaying) "Pausar" else "Reproduzir",
+                                tint = Color.White,
+                                modifier = Modifier.size(34.dp),
+                            )
+                        }
+                    }
+
+                    IconButton(
+                        onClick = onNextChannel,
+                        enabled = openingChannelId == null,
+                        modifier = Modifier
+                            .size(48.dp)
+                            .clip(CircleShape)
+                            .background(Color.Black.copy(alpha = 0.52f)),
+                    ) {
+                        Icon(
+                            imageVector = Icons.Rounded.SkipNext,
+                            contentDescription = "Próximo canal",
+                            tint = Color.White,
+                            modifier = Modifier.size(28.dp),
+                        )
+                    }
+                }
+
+                // Base: Fontes (se houver >1) + Mudo + Proporção + PiP + Sair da tela cheia
+                Row(
+                    modifier = Modifier
+                        .align(Alignment.BottomCenter)
+                        .fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .weight(1f)
+                            .horizontalScroll(rememberScrollState()),
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        if (activeStreams.size > 1) {
+                            activeStreams.forEachIndexed { idx, stream ->
+                                val selected = idx == activeStreamIndex
+                                val label = stream.name
+                                    ?.replace("\n", " ")
+                                    ?.trim()
+                                    ?.takeIf { it.isNotEmpty() }
+                                    ?: "Fonte ${idx + 1}"
+                                Surface(
+                                    onClick = { onSelectSourceIndex(idx) },
+                                    shape = RoundedCornerShape(8.dp),
+                                    color = if (selected) {
+                                        BestCineBranding.PrimaryBlue
+                                    } else {
+                                        Color.Black.copy(alpha = 0.55f)
+                                    },
+                                    border = BorderStroke(
+                                        1.dp,
+                                        if (selected) BestCineBranding.PrimaryBlueBright else Color.White.copy(alpha = 0.20f),
+                                    ),
+                                ) {
+                                    Text(
+                                        text = label,
+                                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp),
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = Color.White,
+                                        fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
+                                    )
+                                }
+                            }
+                        }
+                    }
+
+                    IconButton(
+                        onClick = onToggleMute,
+                        modifier = Modifier
+                            .size(38.dp)
+                            .clip(CircleShape)
+                            .background(Color.Black.copy(alpha = 0.50f)),
+                    ) {
+                        Icon(
+                            imageVector = if (isMuted) Icons.Rounded.VolumeOff else Icons.Rounded.VolumeUp,
+                            contentDescription = if (isMuted) "Ativar som" else "Silenciar",
+                            tint = Color.White,
+                            modifier = Modifier.size(20.dp),
+                        )
+                    }
+
+                    Surface(
+                        onClick = onCycleResizeMode,
+                        shape = RoundedCornerShape(8.dp),
+                        color = Color.Black.copy(alpha = 0.55f),
+                        border = BorderStroke(1.dp, Color.White.copy(alpha = 0.22f)),
+                    ) {
+                        Text(
+                            text = resizeModeLabel,
+                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 7.dp),
+                            style = MaterialTheme.typography.labelSmall,
+                            color = Color.White,
+                            fontWeight = FontWeight.Medium,
+                        )
+                    }
+
+                    IconButton(
+                        onClick = {
+                            onUserActivity()
+                            onTogglePip()
+                        },
+                        modifier = Modifier
+                            .size(38.dp)
+                            .clip(CircleShape)
+                            .background(Color.Black.copy(alpha = 0.50f)),
+                    ) {
+                        Icon(
+                            imageVector = Icons.Rounded.PictureInPictureAlt,
+                            contentDescription = "Picture-in-Picture",
+                            tint = Color.White,
+                            modifier = Modifier.size(20.dp),
+                        )
+                    }
+
+                    IconButton(
+                        onClick = onExitFullscreen,
+                        modifier = Modifier
+                            .size(38.dp)
+                            .clip(CircleShape)
+                            .background(Color.Black.copy(alpha = 0.50f)),
+                    ) {
+                        Icon(
+                            imageVector = Icons.Rounded.FullscreenExit,
+                            contentDescription = "Sair da tela cheia",
+                            tint = Color.White,
+                            modifier = Modifier.size(22.dp),
+                        )
+                    }
+                }
+            }
+        }
     }
 }

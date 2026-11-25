@@ -1,5 +1,6 @@
 package com.nuvio.app.features.catalog
 
+import com.nuvio.app.bestcine.catalog.BestCineStreamingCatalogs
 import com.nuvio.app.core.poster.CustomPosterUrlRepository
 import com.nuvio.app.core.poster.withCustomPosterUrls
 import com.nuvio.app.features.collection.CollectionRepository
@@ -142,14 +143,23 @@ object CatalogRepository {
         activeJob = scope.launch {
             runCatching {
                 when (val target = request.target) {
-                    is CatalogTarget.Addon -> fetchCatalogPage(
-                        manifestUrl = target.manifestUrl,
-                        type = target.contentType,
-                        catalogId = target.catalogId,
-                        genre = target.genre,
-                        skip = requestedSkip.takeIf { it > 0 },
-                        forceRefresh = forceRefresh,
-                    )
+                    is CatalogTarget.Addon -> if (BestCineStreamingCatalogs.isStreamingManifestUrl(target.manifestUrl)) {
+                        BestCineStreamingCatalogs.fetchCatalogPage(
+                            catalogId = target.catalogId,
+                            type = target.contentType,
+                            skip = requestedSkip.takeIf { it > 0 },
+                            forceRefresh = forceRefresh,
+                        )
+                    } else {
+                        fetchCatalogPage(
+                            manifestUrl = target.manifestUrl,
+                            type = target.contentType,
+                            catalogId = target.catalogId,
+                            genre = target.genre,
+                            skip = requestedSkip.takeIf { it > 0 },
+                            forceRefresh = forceRefresh,
+                        )
+                    }
 
                     is CatalogTarget.CollectionSource -> fetchCollectionSourcePage(
                         target = target,

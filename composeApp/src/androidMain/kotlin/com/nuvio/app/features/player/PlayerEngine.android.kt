@@ -991,6 +991,17 @@ private fun ExoPlayerSurface(
                 override val playbackEngine = AndroidPlaybackEngine.ExoPlayer
 
                 private val audioTrackCache = AudioTrackCache()
+                private var preMuteVolume = 1f
+
+                override fun setMuted(muted: Boolean) {
+                    if (muted) {
+                        val current = exoPlayer.volume
+                        if (current > 0f) preMuteVolume = current
+                        exoPlayer.volume = 0f
+                    } else {
+                        exoPlayer.volume = if (preMuteVolume > 0f) preMuteVolume else 1f
+                    }
+                }
 
                 override fun play() {
                     exoPlayer.playWhenReady = true

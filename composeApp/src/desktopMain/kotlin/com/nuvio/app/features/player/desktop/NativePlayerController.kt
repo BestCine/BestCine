@@ -654,6 +654,19 @@ internal class NativePlayerController(
         return true
     }
 
+    private var mutedByController = false
+
+    @Synchronized
+    override fun setMuted(muted: Boolean) {
+        mutedByController = muted
+        if (muted) {
+            setTemporaryVolume(0f)
+        } else {
+            val restore = rememberedVolumeLevel.takeIf { it > 0.01f } ?: 1f
+            setTemporaryVolume(restore)
+        }
+    }
+
     @Synchronized
     private fun adjustFallbackVolume(delta: Float) {
         val current = handle
@@ -698,7 +711,7 @@ internal class NativePlayerController(
     private fun applyRememberedVolume() {
         val current = handle
         if (current == 0L) return
-        val level = rememberedVolumeLevel.coerceDesktopPlayerVolumeLevel()
+        val level = if (mutedByController) 0f else rememberedVolumeLevel.coerceDesktopPlayerVolumeLevel()
         currentVolumeLevel = level
         NativePlayerBridge.setVolume(current, level)
         controlsState = controlsState.copy(volumeLevel = level)
