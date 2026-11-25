@@ -13,6 +13,7 @@ import com.nuvio.app.features.addons.httpGetTextWithHeaders
 import com.nuvio.app.features.addons.httpRequestRaw
 import com.nuvio.app.features.home.HomeCatalogSettingsRepository
 import com.nuvio.app.features.home.HomeRepository
+import com.nuvio.app.features.profiles.ProfileRepository
 import kotlinx.coroutines.CoroutineExceptionHandler
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -92,6 +93,7 @@ object BestCineAccountRepository {
                 return
             }
             _state.update { it.copy(session = restored) }
+            ProfileRepository.syncPrimaryProfileFromBestCineAccount(restored.user.nome, restored.user.avatar)
             ensureBanWatchdogRunning()
         }
     }
@@ -323,6 +325,10 @@ object BestCineAccountRepository {
         }
 
         ensureAppEntered()
+        ProfileRepository.syncPrimaryProfileFromBestCineAccount(
+            syncedSession.user.nome,
+            syncedSession.user.avatar,
+        )
         ensureBanWatchdogRunning()
         if (initialManifest == null) {
             scope.launch {
@@ -467,6 +473,10 @@ object BestCineAccountRepository {
                 }
 
                 ensureAppEntered()
+                ProfileRepository.syncPrimaryProfileFromBestCineAccount(
+                    syncedSession.user.nome,
+                    syncedSession.user.avatar,
+                )
                 ensureBanWatchdogRunning()
                 if (initialManifest == null) {
                     scope.launch {
@@ -565,6 +575,9 @@ object BestCineAccountRepository {
                 }
                 ensureAppEntered()
                 ensureBanWatchdogRunning()
+                scope.launch {
+                    refreshAccountStatus(triggerManifestSyncOnPlanChange = false)
+                }
                 true
             },
             onFailure = { error ->
@@ -653,6 +666,7 @@ object BestCineAccountRepository {
                 "Conta BestCine sincronizada em tempo real: plano=${freshUser.plano}, vencimento=${freshUser.vencimentoApoio}"
             }
         }
+        ProfileRepository.syncPrimaryProfileFromBestCineAccount(freshUser.nome, freshUser.avatar)
 
         if (planChanged && triggerManifestSyncOnPlanChange) {
             scope.launch {

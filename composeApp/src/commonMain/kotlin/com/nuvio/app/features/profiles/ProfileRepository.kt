@@ -123,8 +123,11 @@ object ProfileRepository {
 
     private fun ensureDefaultLocalProfile(userId: String) {
         val bcUser = BestCineAccountRepository.state.value.session?.user
-        val defaultName = bcUser?.nome?.trim()?.takeIf { it.isNotBlank() }?.take(24) ?: "Principal"
-        val defaultAvatarUrl = bcUser?.avatar?.trim()?.takeIf { it.isNotBlank() }
+        val defaultName = bcUser?.nome?.trim()
+            ?.takeIf { it.isNotBlank() && !it.equals("Conta BestCine", ignoreCase = true) }
+            ?.take(24)
+            ?: "Principal"
+        val defaultAvatarUrl = normalizedAvatarUrl(bcUser?.avatar)
         val defaultProfile = NuvioProfile(
             id = "local_profile_1",
             userId = userId,
@@ -140,6 +143,79 @@ object ProfileRepository {
             isLoaded = true,
             hasEverSelectedProfile = false,
             rememberLastProfileEnabled = false,
+        )
+        persist()
+    }
+
+    /**
+     * Sincroniza o perfil principal (indice 1) com nome e foto da conta Google/BestCine
+     * somente quando ele ainda esta com os valores padrao do primeiro login (sem sobrescrever
+     * personalizacoes feitas pelo usuario e sem tocar nos perfis secundarios).
+     */
+    fun syncPrimaryProfileFromBestCineAccount(accountName: String?, accountAvatarUrl: String?) {
+        val cleanName = accountName?.trim()
+            ?.takeIf { it.isNotBlank() && !it.equals("Conta BestCine", ignoreCase = true) }
+            ?.take(24)
+        val cleanAvatar = normalizedAvatarUrl(accountAvatarUrl)
+        if (cleanName == null && cleanAvatar == null) return
+
+        if (_state.value.profiles.isEmpty()) {
+            val loadedFromDisk = loadCachedProfiles()
+            if (!loadedFromDisk && _state.value.profiles.isEmpty()) {
+                val uid = (AuthRepository.state.value as? AuthState.Authenticated)?.userId ?: "local"
+                val defaultProfile = NuvioProfile(
+                    id = "local_profile_1",
+                    userId = uid,
+                    profileIndex = 1,
+                    name = cleanName ?: "Principal",
+                    avatarColorHex = "#1E6BFF",
+                    avatarUrl = cleanAvatar,
+                )
+                activeProfileIndex = 1
+                loadedCacheForUserId = uid
+                _state.value = ProfileState(
+                    profiles = listOf(defaultProfile),
+                    activeProfile = defaultProfile,
+                    isLoaded = true,
+                    hasEverSelectedProfile = false,
+                    rememberLastProfileEnabled = false,
+                )
+                persist()
+                return
+            }
+        }
+
+        val currentProfiles = _state.value.profiles
+        val primaryPos = currentProfiles.indexOfFirst { it.profileIndex == 1 }
+        if (primaryPos < 0) return
+
+        val primary = currentProfiles[primaryPos]
+        val isDefaultName = primary.name.isBlank() ||
+            primary.name.equals("Principal", ignoreCase = true) ||
+            primary.name.equals("Conta BestCine", ignoreCase = true) ||
+            primary.name.equals("Profile 1", ignoreCase = true)
+        val hasNoAvatar = primary.avatarUrl.isNullOrBlank() && primary.avatarId.isNullOrBlank()
+
+        val updatedName = if (cleanName != null && isDefaultName) cleanName else primary.name
+        val updatedAvatarUrl = if (cleanAvatar != null && hasNoAvatar) cleanAvatar else primary.avatarUrl
+
+        if (updatedName == primary.name && updatedAvatarUrl == primary.avatarUrl) return
+
+        val updatedPrimary = primary.copy(
+            name = updatedName,
+            avatarUrl = updatedAvatarUrl,
+        )
+        val updatedProfiles = currentProfiles.toMutableList().apply {
+            this[primaryPos] = updatedPrimary
+        }
+        val updatedActive = if (_state.value.activeProfile?.profileIndex == 1) {
+            updatedPrimary
+        } else {
+            _state.value.activeProfile
+        }
+        _state.value = _state.value.copy(
+            profiles = updatedProfiles,
+            activeProfile = updatedActive,
         )
         persist()
     }
