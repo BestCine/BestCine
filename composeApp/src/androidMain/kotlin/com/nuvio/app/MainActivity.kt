@@ -84,7 +84,7 @@ open class MainActivity : AppCompatActivity() {
             ),
         )
         ThemeSettingsStorage.initialize(applicationContext)
-        com.nuvio.app.bestcine.BestCineAndroidContext.initialize(applicationContext)
+        com.nuvio.app.bestcine.BestCineAndroidContext.bindActivity(this)
         AppIconPlatform.initialize(applicationContext)
         SentrySettingsStorage.initialize(applicationContext)
         SentryInitializer.start(application)
@@ -156,6 +156,11 @@ open class MainActivity : AppCompatActivity() {
         }
     }
 
+    override fun onResume() {
+        super.onResume()
+        com.nuvio.app.bestcine.BestCineAndroidContext.bindActivity(this)
+    }
+
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         setIntent(intent)
@@ -176,6 +181,7 @@ open class MainActivity : AppCompatActivity() {
     }
 
     override fun onDestroy() {
+        com.nuvio.app.bestcine.BestCineAndroidContext.unbindActivity(this)
         EpisodeReleaseNotificationPlatform.unbindActivity(this)
         val receiver = pipRemoteActionReceiver
         if (receiver != null) {

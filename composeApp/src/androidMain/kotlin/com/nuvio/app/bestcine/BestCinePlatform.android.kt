@@ -1,5 +1,6 @@
 package com.nuvio.app.bestcine
 
+import android.app.Activity
 import android.content.Context
 import android.content.Intent
 import android.content.SharedPreferences
@@ -19,6 +20,7 @@ import kotlinx.serialization.json.Json
 import okhttp3.Request
 import java.io.BufferedReader
 import java.io.InputStreamReader
+import java.lang.ref.WeakReference
 import java.net.InetAddress
 import java.net.ServerSocket
 import java.net.SocketTimeoutException
@@ -36,9 +38,26 @@ internal object BestCineAndroidContext {
     var appContext: Context? = null
         private set
 
+    @Volatile
+    private var activityRef: WeakReference<Activity>? = null
+
     fun initialize(context: Context) {
         appContext = context.applicationContext
     }
+
+    fun bindActivity(activity: Activity) {
+        appContext = activity.applicationContext
+        activityRef = WeakReference(activity)
+    }
+
+    fun unbindActivity(activity: Activity) {
+        if (activityRef?.get() === activity) {
+            activityRef = null
+        }
+    }
+
+    fun currentActivity(): Activity? =
+        activityRef?.get()?.takeIf { !it.isFinishing && !it.isDestroyed }
 }
 
 internal actual object BestCinePlatformStorage {
@@ -177,7 +196,9 @@ internal actual object BestCinePlatformAuth {
         val port = serverSocket.localPort
 
         val authUrl = "$cleanOrigin/auth/app?port=$port&state=${URLEncoder.encode(expectedState, "UTF-8")}&cb=deeplink"
-        val opened = openAuthInRealBrowser(context, authUrl)
+        val opened = withContext(Dispatchers.Main) {
+            openAuthInRealBrowser(context, authUrl)
+        }
 
         if (!opened) {
             runCatching { serverSocket.close() }
@@ -362,21 +383,30 @@ internal actual object BestCinePlatformAuth {
     private fun openAuthInRealBrowser(context: Context, authUrl: String): Boolean {
         val uri = Uri.parse(authUrl)
         val browserPkg = resolveRealBrowserPackage(context)
+        val hostActivity = BestCineAndroidContext.currentActivity()
+        val launchContext: Context = hostActivity ?: context
+        val needsNewTask = hostActivity == null
         if (!browserPkg.isNullOrBlank()) {
-            // Abre direto no navegador real via Custom Tab (evita que o WebAPK do PWA BestCine
-            // sequestre /auth/app ou /auth/google/callback e trave o login do app nativo).
+            // Abre direto no navegador real via Custom Tab dentro da mesma task da MainActivity
+            // (sem FLAG_ACTIVITY_NEW_TASK quando temos Activity). Assim:
+            // 1) evita sequestro pelo WebAPK do PWA BestCine;
+            // 2) não cria aba avulsa presa no Chrome;
+            // 3) fecha automaticamente quando LinkActivity traz MainActivity com CLEAR_TOP!
             val customTabLaunched = runCatching {
                 val intent = Intent(Intent.ACTION_VIEW, uri).apply {
                     addCategory(Intent.CATEGORY_BROWSABLE)
                     setPackage(browserPkg)
-                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                    if (needsNewTask) {
+                        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                    }
                     val extras = Bundle()
                     extras.putBinder("android.support.customtabs.extra.SESSION", null)
                     putExtras(extras)
                     putExtra("android.support.customtabs.extra.TOOLBAR_COLOR", 0xFF0A1020.toInt())
                     putExtra("android.support.customtabs.extra.TITLE_VISIBILITY", 1)
+                    putExtra("android.support.customtabs.extra.SHARE_STATE", 2)
                 }
-                context.startActivity(intent)
+                launchContext.startActivity(intent)
                 true
             }.getOrDefault(false)
             if (customTabLaunched) return true
@@ -384,9 +414,11 @@ internal actual object BestCinePlatformAuth {
         return runCatching {
             val fallback = Intent(Intent.ACTION_VIEW, uri).apply {
                 addCategory(Intent.CATEGORY_BROWSABLE)
-                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                if (needsNewTask) {
+                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                }
             }
-            context.startActivity(fallback)
+            launchContext.startActivity(fallback)
             true
         }.getOrDefault(false)
     }
