@@ -150,7 +150,7 @@ object BestCineCastController {
                     targetHostIp = device.hostIp.ifBlank { null },
                 )
                 val usingProxy = !proxiedUrl.isNullOrBlank()
-                val playbackUrl = proxiedUrl ?: media.url
+                var playbackUrl = proxiedUrl ?: media.url
 
                 log.i {
                     "DLNA cast -> device=${device.friendlyName} (${device.hostIp}) " +
@@ -166,7 +166,9 @@ object BestCineCastController {
                     )
                 }
 
-                // 2. Define URI + metadados DIDL-Lite com fallback automático
+                // 2. Define URI + metadados DIDL-Lite com fallback automático.
+                //    Se o proxy entregou `/live.m3u8` (HLS nativo com suporte a áudio separado tipo Pluto TV)
+                //    e uma TV muito antiga recusar `.m3u8`, cai automaticamente para `/live.ts` no mesmo proxy!
                 var setUriResult = trySetAvTransportUri(
                     controlUrl = device.avTransportControlUrl,
                     title = media.title,
@@ -174,6 +176,22 @@ object BestCineCastController {
                     mimeType = dlnaMimeType,
                     isLive = isHlsOrLive,
                 )
+
+                if (!setUriResult.ok && usingProxy && playbackUrl.endsWith("/live.m3u8", ignoreCase = true)) {
+                    val tsFallbackUrl = playbackUrl.replace("/live.m3u8", "/live.ts", ignoreCase = true)
+                    log.w { "TV recusou /live.m3u8 (${setUriResult.diagnosticSummary()}); tentando fallback /live.ts..." }
+                    val tsResult = trySetAvTransportUri(
+                        controlUrl = device.avTransportControlUrl,
+                        title = media.title,
+                        uri = tsFallbackUrl,
+                        mimeType = "video/mp2t",
+                        isLive = true,
+                    )
+                    if (tsResult.ok) {
+                        playbackUrl = tsFallbackUrl
+                        setUriResult = tsResult
+                    }
+                }
 
                 // Se usou proxy e a TV sequer alcançou o proxy (ex.: Firewall do Windows bloqueando),
                 // tenta enviar o link direto como plano B antes de falhar!
@@ -225,6 +243,29 @@ object BestCineCastController {
                         action = "Play",
                         bodyXml = "<InstanceID>0</InstanceID><Speed>1</Speed>",
                     )
+                }
+                if (!playResult.ok && usingProxy && playbackUrl.endsWith("/live.m3u8", ignoreCase = true)) {
+                    val tsFallbackUrl = playbackUrl.replace("/live.m3u8", "/live.ts", ignoreCase = true)
+                    log.w { "Play falhou em /live.m3u8; tentando fallback automático para /live.ts..." }
+                    val tsSet = trySetAvTransportUri(
+                        controlUrl = device.avTransportControlUrl,
+                        title = media.title,
+                        uri = tsFallbackUrl,
+                        mimeType = "video/mp2t",
+                        isLive = true,
+                    )
+                    if (tsSet.ok) {
+                        delay(300L)
+                        val tsPlay = sendAvTransportAction(
+                            controlUrl = device.avTransportControlUrl,
+                            action = "Play",
+                            bodyXml = "<InstanceID>0</InstanceID><Speed>1</Speed>",
+                        )
+                        if (tsPlay.ok) {
+                            playbackUrl = tsFallbackUrl
+                            playResult = tsPlay
+                        }
+                    }
                 }
                 if (!playResult.ok) {
                     val diag = playResult.diagnosticSummary()
@@ -295,12 +336,20 @@ object BestCineCastController {
         mimeType: String,
         isLive: Boolean,
     ): SoapResult {
+        val isM3u8 = uri.substringBefore('?').lowercase().endsWith(".m3u8")
         val metadataCandidates = buildList {
-            add(buildDidlLiteMetadata(title, uri, mimeType, isLive))
-            if (mimeType != "video/mp4") {
-                add(buildDidlLiteMetadata(title, uri, "video/mp4", isLive))
+            if (isM3u8) {
+                add(buildDidlLiteMetadata(title, uri, "application/x-mpegURL", isLive))
+                add(buildDidlLiteMetadata(title, uri, "application/vnd.apple.mpegurl", isLive))
+                add(buildDidlLiteMetadata(title, uri, "video/mp2t", isLive))
+                add("")
+            } else {
+                add(buildDidlLiteMetadata(title, uri, mimeType, isLive))
+                if (mimeType != "video/mp4") {
+                    add(buildDidlLiteMetadata(title, uri, "video/mp4", isLive))
+                }
+                add("") // Fallback sem DIDL-Lite (aceito por vários modelos Samsung/LG antigos)
             }
-            add("") // Fallback sem DIDL-Lite (aceito por vários modelos Samsung/LG antigos)
         }
         var lastResult = SoapResult(ok = false)
         for (didl in metadataCandidates) {
