@@ -43,6 +43,7 @@ import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
 import javax.crypto.Cipher
+import javax.crypto.CipherInputStream
 import javax.crypto.spec.IvParameterSpec
 import javax.crypto.spec.SecretKeySpec
 
@@ -51,9 +52,9 @@ internal actual fun BestCineCastModalContainer(
     onDismissRequest: () -> Unit,
     content: @Composable () -> Unit,
 ) {
-    // JDialog nativo pertencente à janela do BestCine:
+    // JDialog nativo pertencente à janela do BestCine (Windows, macOS e Linux):
     // - alwaysOnTop = false: NÃO acompanha o Alt+Tab sobre outros programas!
-    // - Como é janela filha nativa do JFrame, ainda flutua 100% acima do player Win32/HWND!
+    // - Como é janela filha nativa do JFrame, ainda flutua 100% acima do player nativo!
     val dialogState = rememberDialogState(
         position = WindowPosition(Alignment.Center),
         width = 520.dp,
@@ -228,7 +229,9 @@ private fun listLocalIpv4Addresses(): List<InetAddress> = runCatching {
         val nameLower = (ni.name + " " + ni.displayName).lowercase()
         if (nameLower.contains("vethernet") || nameLower.contains("wsl") ||
             nameLower.contains("docker") || nameLower.contains("hyper-v") ||
-            nameLower.contains("vmware") || nameLower.contains("virtualbox")
+            nameLower.contains("vmware") || nameLower.contains("virtualbox") ||
+            nameLower.contains("utun") || nameLower.contains("awdl") ||
+            nameLower.contains("llw") || nameLower.contains("bridge")
         ) continue
         val addrs = ni.inetAddresses
         while (addrs.hasMoreElements()) {
@@ -270,6 +273,7 @@ private class LocalDlnaHttpProxy(
         .writeTimeout(15, TimeUnit.SECONDS)
         .followRedirects(true)
         .followSslRedirects(true)
+        .retryOnConnectionFailure(true)
         .build()
 
     private val serverSocket = ServerSocket(0, 16, InetAddress.getByName("0.0.0.0"))
@@ -317,7 +321,11 @@ private class LocalDlnaHttpProxy(
     private fun handleClient(client: Socket) {
         receivedAnyRequest.set(true)
         client.use { socket ->
-            socket.soTimeout = 30_000
+            runCatching {
+                socket.tcpNoDelay = true
+                socket.keepAlive = true
+            }
+            socket.soTimeout = 45_000
             val reader = BufferedReader(InputStreamReader(socket.getInputStream(), StandardCharsets.ISO_8859_1))
             val requestLine = reader.readLine() ?: return
             val parts = requestLine.split(' ')
@@ -334,11 +342,10 @@ private class LocalDlnaHttpProxy(
                 }
             }
 
-            val out = BufferedOutputStream(socket.getOutputStream())
+            val out = BufferedOutputStream(socket.getOutputStream(), 32 * 1024)
             val dlnaOp = if (isLiveStream) "00" else "01"
             val dlnaFeatures = "DLNA.ORG_OP=$dlnaOp;DLNA.ORG_CI=0;DLNA.ORG_FLAGS=01700000000000000000000000000000"
 
-            // Samsung/LG fazem HEAD antes de tocar: para live/HLS respondemos imediatamente com video/mp2t
             if (isLiveStream && method == "HEAD") {
                 lastDiagnostic = "HEAD live -> 200 video/mp2t"
                 val headerBlock = buildString {
@@ -360,13 +367,11 @@ private class LocalDlnaHttpProxy(
                 return
             }
 
-            // Para VOD HEAD: muitos CDNs recusam HEAD (405/403)! Sondamos com GET Range: bytes=0-0!
             if (method == "HEAD") {
                 handleVodHead(out, dlnaFeatures)
                 return
             }
 
-            // VOD GET (com suporte a Range/Seek e auto-detecção de HLS)
             handleVodGet(out, reqHeaders["range"], dlnaFeatures)
         }
     }
@@ -376,7 +381,6 @@ private class LocalDlnaHttpProxy(
             openUpstream(defaultUrl, rangeHeader = "bytes=0-0")
         }.getOrElse { ex ->
             lastDiagnostic = "HEAD falha na origem: ${ex.message}"
-            // Mesmo se falhar o probe, devolve 200 otimista para a TV tentar GET
             val fallback = buildString {
                 append("HTTP/1.1 200 OK\r\n")
                 append("Content-Type: $defaultContentType\r\n")
@@ -416,10 +420,8 @@ private class LocalDlnaHttpProxy(
     }
 
     private fun handleVodGet(out: OutputStream, rangeHeader: String?, dlnaFeatures: String) {
-        val resp = runCatching {
-            openUpstream(defaultUrl, rangeHeader = rangeHeader)
-        }.getOrElse { ex ->
-            lastDiagnostic = "GET falha na origem: ${ex.message}"
+        val resp = openUpstreamWithRetry(defaultUrl, rangeHeader = rangeHeader, maxAttempts = 2)
+        if (resp == null) {
             val err = "HTTP/1.1 502 Bad Gateway\r\nConnection: close\r\n\r\n"
             out.write(err.toByteArray(StandardCharsets.ISO_8859_1))
             out.flush()
@@ -439,7 +441,6 @@ private class LocalDlnaHttpProxy(
                 return
             }
 
-            // Verifica se o filme/episódio na verdade é uma playlist HLS (.m3u8)
             val input = BufferedInputStream(body.byteStream(), 64 * 1024)
             input.mark(8192)
             val probeBuf = ByteArray(256)
@@ -452,19 +453,13 @@ private class LocalDlnaHttpProxy(
 
             if (isHls) {
                 lastDiagnostic = "GET VOD HLS -> convertendo para video/mp2t"
-                val headerBlock = buildString {
-                    append("HTTP/1.1 200 OK\r\n")
-                    append("Content-Type: video/mp2t\r\n")
-                    append("Accept-Ranges: none\r\n")
-                    append("Access-Control-Allow-Origin: *\r\n")
-                    append("transferMode.dlna.org: Streaming\r\n")
-                    append("contentFeatures.dlna.org: DLNA.ORG_OP=00;DLNA.ORG_CI=0;DLNA.ORG_FLAGS=01700000000000000000000000000000\r\n")
-                    append("Connection: close\r\n\r\n")
-                }
-                out.write(headerBlock.toByteArray(StandardCharsets.ISO_8859_1))
-                out.flush()
                 val initialPlaylist = input.bufferedReader(StandardCharsets.UTF_8).readText()
-                streamHlsAsMpegTs(initialPlaylist, finalUrl, out)
+                streamHlsAsMpegTs(
+                    initialText = initialPlaylist,
+                    initialUrl = finalUrl,
+                    out = out,
+                    dlnaFeatures = "DLNA.ORG_OP=00;DLNA.ORG_CI=0;DLNA.ORG_FLAGS=01700000000000000000000000000000",
+                )
                 return
             }
 
@@ -488,7 +483,7 @@ private class LocalDlnaHttpProxy(
             out.write(headerBlock.toByteArray(StandardCharsets.ISO_8859_1))
             out.flush()
 
-            val buffer = ByteArray(64 * 1024)
+            val buffer = ByteArray(32 * 1024)
             while (running) {
                 val read = input.read(buffer)
                 if (read <= 0) break
@@ -499,10 +494,8 @@ private class LocalDlnaHttpProxy(
     }
 
     private fun handleLiveOrHlsStream(out: OutputStream, dlnaFeatures: String) {
-        val resp = runCatching {
-            openUpstream(defaultUrl, rangeHeader = null)
-        }.getOrElse { ex ->
-            lastDiagnostic = "Live falha na origem: ${ex.message}"
+        val resp = openUpstreamWithRetry(defaultUrl, rangeHeader = null, maxAttempts = 3)
+        if (resp == null) {
             val errHeader = "HTTP/1.1 502 Bad Gateway\r\nConnection: close\r\n\r\n"
             out.write(errHeader.toByteArray(StandardCharsets.ISO_8859_1))
             out.flush()
@@ -535,20 +528,9 @@ private class LocalDlnaHttpProxy(
 
             lastDiagnostic = if (isHlsPlaylist) "Live HLS -> video/mp2t" else "Live TS -> video/mp2t"
 
-            val headerBlock = buildString {
-                append("HTTP/1.1 200 OK\r\n")
-                append("Content-Type: video/mp2t\r\n")
-                append("Accept-Ranges: none\r\n")
-                append("Access-Control-Allow-Origin: *\r\n")
-                append("transferMode.dlna.org: Streaming\r\n")
-                append("contentFeatures.dlna.org: $dlnaFeatures\r\n")
-                append("Connection: close\r\n\r\n")
-            }
-            out.write(headerBlock.toByteArray(StandardCharsets.ISO_8859_1))
-            out.flush()
-
             if (!isHlsPlaylist) {
-                val buffer = ByteArray(64 * 1024)
+                writeLiveTsHeaders(out, dlnaFeatures)
+                val buffer = ByteArray(16 * 1024)
                 while (running) {
                     val read = input.read(buffer)
                     if (read <= 0) break
@@ -559,36 +541,68 @@ private class LocalDlnaHttpProxy(
             }
 
             val initialPlaylist = input.bufferedReader(StandardCharsets.UTF_8).readText()
-            streamHlsAsMpegTs(initialPlaylist, finalUrl, out)
+            streamHlsAsMpegTs(initialPlaylist, finalUrl, out, dlnaFeatures)
         }
     }
 
-    private fun streamHlsAsMpegTs(initialText: String, initialUrl: String, out: OutputStream) {
+    private fun writeLiveTsHeaders(out: OutputStream, dlnaFeatures: String) {
+        val headerBlock = buildString {
+            append("HTTP/1.1 200 OK\r\n")
+            append("Content-Type: video/mp2t\r\n")
+            append("Accept-Ranges: none\r\n")
+            append("Access-Control-Allow-Origin: *\r\n")
+            append("transferMode.dlna.org: Streaming\r\n")
+            append("contentFeatures.dlna.org: $dlnaFeatures\r\n")
+            append("Connection: close\r\n\r\n")
+        }
+        out.write(headerBlock.toByteArray(StandardCharsets.ISO_8859_1))
+        out.flush()
+    }
+
+    private fun streamHlsAsMpegTs(
+        initialText: String,
+        initialUrl: String,
+        out: OutputStream,
+        dlnaFeatures: String,
+    ) {
         var mediaUrl = initialUrl
         var playlistText = initialText
 
         if (playlistText.contains("#EXT-X-STREAM-INF")) {
-            val bestVariant = pickBestHlsVariant(playlistText, mediaUrl) ?: return
+            val bestVariant = pickBestHlsVariant(playlistText, mediaUrl) ?: run {
+                out.write("HTTP/1.1 502 Bad Gateway\r\nConnection: close\r\n\r\n".toByteArray(StandardCharsets.ISO_8859_1))
+                out.flush()
+                return
+            }
             mediaUrl = bestVariant
-            playlistText = fetchText(mediaUrl) ?: return
+            playlistText = fetchTextWithRetry(mediaUrl, attempts = 3) ?: run {
+                out.write("HTTP/1.1 502 Bad Gateway\r\nConnection: close\r\n\r\n".toByteArray(StandardCharsets.ISO_8859_1))
+                out.flush()
+                return
+            }
         }
 
         val sentSegments = LinkedHashSet<String>()
         val keyCache = HashMap<String, ByteArray>()
         var isFirstPoll = true
-        var consecutiveEmptyPolls = 0
+        var headersSent = false
+        var consecutiveErrors = 0
 
         while (running) {
             val parsed = parseHlsMediaPlaylist(playlistText, mediaUrl)
             val segments = parsed.segments
             if (segments.isEmpty()) {
-                consecutiveEmptyPolls += 1
-                if (consecutiveEmptyPolls >= 5) break
-                Thread.sleep(1200L)
-                playlistText = fetchText(mediaUrl) ?: break
+                consecutiveErrors += 1
+                if (consecutiveErrors >= 8) break
+                if (!safeSleep(1000L)) return
+                val refreshed = refreshMediaPlaylist(mediaUrl)
+                if (refreshed != null) {
+                    mediaUrl = refreshed.first
+                    playlistText = refreshed.second
+                }
                 continue
             }
-            consecutiveEmptyPolls = 0
+            consecutiveErrors = 0
 
             val toStream = if (isFirstPoll && !parsed.isVod && segments.size > 3) {
                 segments.dropLast(2).forEach { sentSegments.add(it.url) }
@@ -600,37 +614,156 @@ private class LocalDlnaHttpProxy(
 
             for (seg in toStream) {
                 if (!running) return
-                val rawBytes = fetchBytes(seg.url) ?: continue
-                val payload = if (seg.keyUri != null) {
-                    val keyBytes = keyCache.getOrPut(seg.keyUri) {
-                        fetchBytes(seg.keyUri) ?: ByteArray(0)
-                    }
-                    if (keyBytes.size == 16) decryptAes128Cbc(rawBytes, keyBytes, seg.iv) else rawBytes
-                } else {
-                    rawBytes
-                }
-                try {
-                    out.write(payload)
-                    out.flush()
-                } catch (_: Throwable) {
+                val streamed = streamSegmentChunked(
+                    seg = seg,
+                    keyCache = keyCache,
+                    out = out,
+                    sendHeadersFirst = !headersSent,
+                    dlnaFeatures = dlnaFeatures,
+                )
+                if (streamed == SegmentStreamResult.CLIENT_DISCONNECTED) {
                     return
                 }
-                sentSegments.add(seg.url)
-                if (sentSegments.size > 96) {
-                    val it = sentSegments.iterator()
-                    if (it.hasNext()) {
-                        it.next()
-                        it.remove()
+                if (streamed == SegmentStreamResult.OK) {
+                    headersSent = true
+                    sentSegments.add(seg.url)
+                    if (sentSegments.size > 96) {
+                        val it = sentSegments.iterator()
+                        if (it.hasNext()) {
+                            it.next()
+                            it.remove()
+                        }
                     }
                 }
             }
 
             if (parsed.isVod) break
 
-            val waitMs = ((parsed.targetDurationSec.coerceIn(2, 8)) * 500L)
-            Thread.sleep(waitMs)
-            playlistText = fetchText(mediaUrl) ?: break
+            val waitMs = ((parsed.targetDurationSec.coerceIn(2, 6)) * 450L)
+            if (!safeSleep(waitMs)) return
+
+            var nextPlaylist: Pair<String, String>? = null
+            var pollTry = 0
+            while (running && pollTry < 6 && nextPlaylist == null) {
+                nextPlaylist = refreshMediaPlaylist(mediaUrl)
+                if (nextPlaylist == null) {
+                    pollTry += 1
+                    if (!safeSleep(750L)) return
+                }
+            }
+            if (nextPlaylist == null) break
+            mediaUrl = nextPlaylist.first
+            playlistText = nextPlaylist.second
         }
+    }
+
+    private fun safeSleep(ms: Long): Boolean {
+        if (!running) return false
+        return try {
+            Thread.sleep(ms)
+            running
+        } catch (_: InterruptedException) {
+            false
+        }
+    }
+
+    private enum class SegmentStreamResult { OK, UPSTREAM_FAILED, CLIENT_DISCONNECTED }
+
+    private fun streamSegmentChunked(
+        seg: HlsSegment,
+        keyCache: HashMap<String, ByteArray>,
+        out: OutputStream,
+        sendHeadersFirst: Boolean,
+        dlnaFeatures: String,
+    ): SegmentStreamResult {
+        val resp = openUpstreamWithRetry(seg.url, rangeHeader = null, maxAttempts = 2)
+            ?: return SegmentStreamResult.UPSTREAM_FAILED
+
+        return resp.use { r ->
+            val body = r.body
+            if (!r.isSuccessful || body == null) return@use SegmentStreamResult.UPSTREAM_FAILED
+
+            val rawStream = if (seg.keyUri != null) {
+                val keyBytes = keyCache.getOrPut(seg.keyUri) {
+                    fetchBytes(seg.keyUri) ?: ByteArray(0)
+                }
+                if (keyBytes.size == 16) {
+                    val cipher = Cipher.getInstance("AES/CBC/PKCS5Padding")
+                    cipher.init(Cipher.DECRYPT_MODE, SecretKeySpec(keyBytes, "AES"), IvParameterSpec(seg.iv))
+                    CipherInputStream(body.byteStream(), cipher)
+                } else {
+                    body.byteStream()
+                }
+            } else {
+                body.byteStream()
+            }
+
+            var headerWritten = !sendHeadersFirst
+            val buf = ByteArray(16 * 1024)
+            try {
+                rawStream.use { inp ->
+                    while (running) {
+                        val read = inp.read(buf)
+                        if (read <= 0) break
+                        if (!headerWritten) {
+                            writeLiveTsHeaders(out, dlnaFeatures)
+                            headerWritten = true
+                        }
+                        try {
+                            out.write(buf, 0, read)
+                            out.flush()
+                        } catch (_: Throwable) {
+                            return@use SegmentStreamResult.CLIENT_DISCONNECTED
+                        }
+                    }
+                }
+                if (headerWritten) SegmentStreamResult.OK else SegmentStreamResult.UPSTREAM_FAILED
+            } catch (_: Throwable) {
+                if (headerWritten) SegmentStreamResult.OK else SegmentStreamResult.UPSTREAM_FAILED
+            }
+        }
+    }
+
+    private fun refreshMediaPlaylist(currentMediaUrl: String): Pair<String, String>? {
+        fetchText(currentMediaUrl)?.let { text ->
+            if (text.contains("#EXTM3U")) return currentMediaUrl to text
+        }
+        val resp = runCatching { openUpstream(defaultUrl, rangeHeader = null) }.getOrNull() ?: return null
+        return resp.use { r ->
+            if (!r.isSuccessful) return@use null
+            val resolvedUrl = r.request.url.toString()
+            val text = r.body?.string() ?: return@use null
+            if (!text.contains("#EXTM3U")) return@use null
+            if (text.contains("#EXT-X-STREAM-INF")) {
+                val variant = pickBestHlsVariant(text, resolvedUrl) ?: return@use null
+                val variantText = fetchText(variant) ?: return@use null
+                variant to variantText
+            } else {
+                resolvedUrl to text
+            }
+        }
+    }
+
+    private fun openUpstreamWithRetry(url: String, rangeHeader: String?, maxAttempts: Int): Response? {
+        var attempt = 0
+        while (running && attempt < maxAttempts) {
+            attempt += 1
+            val resp = runCatching { openUpstream(url, rangeHeader) }.getOrElse { ex ->
+                lastDiagnostic = "Origem erro (tentativa $attempt): ${ex.message}"
+                null
+            }
+            if (resp != null) {
+                if (resp.isSuccessful) return resp
+                val code = resp.code
+                lastDiagnostic = "Origem HTTP $code (tentativa $attempt)"
+                if (attempt >= maxAttempts) return resp
+                resp.close()
+            }
+            if (attempt < maxAttempts && !safeSleep(450L * attempt)) {
+                return null
+            }
+        }
+        return null
     }
 
     private fun openUpstream(url: String, rangeHeader: String?): Response {
@@ -647,6 +780,14 @@ private class LocalDlnaHttpProxy(
             builder.header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
         }
         return httpClient.newCall(builder.build()).execute()
+    }
+
+    private fun fetchTextWithRetry(url: String, attempts: Int): String? {
+        repeat(attempts) { idx ->
+            fetchText(url)?.let { return it }
+            if (idx + 1 < attempts && !safeSleep(400L)) return null
+        }
+        return null
     }
 
     private fun fetchText(url: String): String? = runCatching {
@@ -759,10 +900,4 @@ private class LocalDlnaHttpProxy(
         }
         return out
     }
-
-    private fun decryptAes128Cbc(data: ByteArray, key: ByteArray, iv: ByteArray): ByteArray = runCatching {
-        val cipher = Cipher.getInstance("AES/CBC/PKCS5Padding")
-        cipher.init(Cipher.DECRYPT_MODE, SecretKeySpec(key, "AES"), IvParameterSpec(iv))
-        cipher.doFinal(data)
-    }.getOrDefault(data)
 }
