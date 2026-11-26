@@ -357,8 +357,8 @@ object BestCineTvRepository {
             )
         }
 
-        val catalogUrl = "$addonBaseUrl/catalog/tv/bestcine_tv_catalog.json"
-        log.i { "Carregando grade de TV ao vivo (1 requisição): $catalogUrl" }
+        val catalogUrl = "$addonBaseUrl/bestcine-tv/catalog.json"
+        log.i { "Carregando grade de TV ao vivo exclusiva BestCine (1 requisição): $catalogUrl" }
 
         val result = runCatching {
             withContext(Dispatchers.Default) {
@@ -481,7 +481,7 @@ object BestCineTvRepository {
             )
         }
 
-        val streamUrl = "$addonBaseUrl/stream/tv/${channel.id}.json"
+        val streamUrl = "$addonBaseUrl/bestcine-tv/stream/${channel.id}.json"
         val fetched = runCatching {
             withContext(Dispatchers.Default) {
                 val payload = fetchAddonResponseText(streamUrl, forceRefresh = true)
@@ -596,8 +596,8 @@ object BestCineTvRepository {
 
         val installed = AddonRepository.uiState.value.addons.firstOrNull { addon ->
             addon.enabled && (
-                addon.manifestUrl.contains("bestcine", ignoreCase = true) ||
-                    addon.manifest?.catalogs?.any { it.id == "bestcine_tv_catalog" } == true
+                addon.manifestUrl.contains("/bc_", ignoreCase = false) ||
+                    addon.manifestUrl.contains("bestcine", ignoreCase = true)
                 )
         }
         return installed?.manifestUrl

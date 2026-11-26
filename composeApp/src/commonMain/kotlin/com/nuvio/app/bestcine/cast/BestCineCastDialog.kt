@@ -34,7 +34,6 @@ import androidx.compose.material.icons.rounded.Pause
 import androidx.compose.material.icons.rounded.PlayArrow
 import androidx.compose.material.icons.rounded.Refresh
 import androidx.compose.material.icons.rounded.Replay10
-import androidx.compose.material.icons.rounded.ScreenShare
 import androidx.compose.material.icons.rounded.Stop
 import androidx.compose.material.icons.rounded.Tv
 import androidx.compose.material.icons.rounded.Wifi
@@ -835,54 +834,6 @@ fun BestCineCastDialog(
                                         text = "Toque aqui e marque \"Sem restrições\" na bateria",
                                         style = MaterialTheme.typography.bodySmall,
                                         color = Color(0xFFFDE68A).copy(alpha = 0.85f),
-                                    )
-                                }
-                            }
-                        }
-                    }
-
-                    // Atalho nativo do Android para Chromecast antigo / Smart View / Espelhamento
-                    if (BestCineCastController.supportsSystemScreenCastShortcut) {
-                        HorizontalDivider(color = Color.White.copy(alpha = 0.07f))
-                        Surface(
-                            onClick = { BestCineCastController.openSystemScreenCastSettings() },
-                            shape = RoundedCornerShape(14.dp),
-                            color = Color.White.copy(alpha = 0.04f),
-                            border = BorderStroke(1.dp, Color.White.copy(alpha = 0.12f)),
-                            modifier = Modifier.fillMaxWidth(),
-                        ) {
-                            Row(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(horizontal = 14.dp, vertical = 11.dp),
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(12.dp),
-                            ) {
-                                Box(
-                                    modifier = Modifier
-                                        .size(36.dp)
-                                        .clip(RoundedCornerShape(10.dp))
-                                        .background(BestCineBranding.PrimaryBlue.copy(alpha = 0.20f)),
-                                    contentAlignment = Alignment.Center,
-                                ) {
-                                    Icon(
-                                        imageVector = Icons.Rounded.ScreenShare,
-                                        contentDescription = null,
-                                        tint = Color(0xFF93C5FD),
-                                        modifier = Modifier.size(19.dp),
-                                    )
-                                }
-                                Column(modifier = Modifier.weight(1f)) {
-                                    Text(
-                                        text = "Espelhar tela (Chromecast / Smart View)",
-                                        style = MaterialTheme.typography.labelLarge,
-                                        color = Color.White,
-                                        fontWeight = FontWeight.SemiBold,
-                                    )
-                                    Text(
-                                        text = "Para Chromecasts antigos e transmissão sem fio",
-                                        style = MaterialTheme.typography.bodySmall,
-                                        color = Color(0xFF94A3B8),
                                     )
                                 }
                             }

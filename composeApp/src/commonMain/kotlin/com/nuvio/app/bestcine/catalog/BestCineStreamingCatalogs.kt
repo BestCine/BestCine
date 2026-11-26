@@ -198,13 +198,29 @@ data class BestCineStreamingCatalogConfig(
         }
 }
 
+data class BestCineDiscoverCatalogSpec(
+    val id: String,
+    val type: String,
+    val title: String,
+    val sourceLabel: String,
+    val genreOptions: List<String>,
+)
+
 object BestCineStreamingCatalogs {
     const val MANIFEST_URL = "bestcine://streaming-catalogs-br"
+    const val DISCOVER_MANIFEST_URL = "bestcine://discover-br"
     const val MOMENT_CATALOG_ID = "sessao_momento"
     const val SEASONAL_CATALOG_ID = "especial_sazonal"
     const val RUNTIME_QUICK_MOVIES_ID = "tempo_rapidos"
     const val RUNTIME_SHORT_SERIES_ID = "tempo_miniseries"
     const val RUNTIME_EPIC_MOVIES_ID = "tempo_epicos"
+    private const val DISCOVER_POPULAR_ID = "discover_popular"
+    private const val DISCOVER_TOP_RATED_ID = "discover_top_rated"
+    private const val DISCOVER_RECENT_ID = "discover_recent"
+    private const val DISCOVER_BRAZIL_ID = "discover_brazil"
+    private const val DISCOVER_ANIMES_ID = "discover_animes"
+    private const val DISCOVER_DORAMAS_ID = "discover_doramas"
+    private const val DISCOVER_PROVIDER_PREFIX = "discover_prov_"
     private const val KEY_PREFIX = "bestcine_streaming_br:"
     private const val WATCH_REGION_BR = "BR"
     private const val TMDB_PAGE_SIZE = 20
@@ -311,6 +327,79 @@ object BestCineStreamingCatalogs {
 
     fun isStreamingManifestUrl(manifestUrl: String): Boolean =
         manifestUrl == MANIFEST_URL
+
+    fun isDiscoverManifestUrl(manifestUrl: String): Boolean =
+        manifestUrl == DISCOVER_MANIFEST_URL
+
+    private val movieDiscoverGenreIds: Map<String, String> = linkedMapOf(
+        "Ação" to "28",
+        "Aventura" to "12",
+        "Animação" to "16",
+        "Comédia" to "35",
+        "Crime" to "80",
+        "Documentário" to "99",
+        "Drama" to "18",
+        "Família" to "10751",
+        "Fantasia" to "14",
+        "Ficção Científica" to "878",
+        "Guerra" to "10752",
+        "Mistério" to "9648",
+        "Romance" to "10749",
+        "Suspense" to "53",
+        "Terror" to "27",
+    )
+
+    private val seriesDiscoverGenreIds: Map<String, String> = linkedMapOf(
+        "Ação & Aventura" to "10759",
+        "Animação" to "16",
+        "Comédia" to "35",
+        "Crime" to "80",
+        "Documentário" to "99",
+        "Drama" to "18",
+        "Família" to "10751",
+        "Ficção & Fantasia" to "10765",
+        "Mistério" to "9648",
+        "Reality" to "10764",
+    )
+
+    val discoverCatalogs: List<BestCineDiscoverCatalogSpec> by lazy {
+        val movieGenres = movieDiscoverGenreIds.keys.toList()
+        val seriesGenres = seriesDiscoverGenreIds.keys.toList()
+        buildList {
+            // Filmes
+            add(BestCineDiscoverCatalogSpec(DISCOVER_POPULAR_ID, "movie", "Populares", "BestCine", movieGenres))
+            add(BestCineDiscoverCatalogSpec(DISCOVER_RECENT_ID, "movie", "Lançamentos Recentes", "BestCine", movieGenres))
+            add(BestCineDiscoverCatalogSpec(DISCOVER_TOP_RATED_ID, "movie", "Mais Bem Avaliados", "BestCine", movieGenres))
+            add(BestCineDiscoverCatalogSpec(DISCOVER_BRAZIL_ID, "movie", "Cinema Brasileiro", "BestCine", movieGenres))
+            allProviders.forEach { prov ->
+                add(
+                    BestCineDiscoverCatalogSpec(
+                        id = "$DISCOVER_PROVIDER_PREFIX${prov.id}",
+                        type = "movie",
+                        title = prov.displayName,
+                        sourceLabel = "BestCine Streaming",
+                        genreOptions = movieGenres,
+                    ),
+                )
+            }
+            // Séries
+            add(BestCineDiscoverCatalogSpec(DISCOVER_POPULAR_ID, "series", "Populares", "BestCine", seriesGenres))
+            add(BestCineDiscoverCatalogSpec(DISCOVER_TOP_RATED_ID, "series", "Mais Bem Avaliadas", "BestCine", seriesGenres))
+            add(BestCineDiscoverCatalogSpec(DISCOVER_ANIMES_ID, "series", "Animes", "BestCine", emptyList()))
+            add(BestCineDiscoverCatalogSpec(DISCOVER_DORAMAS_ID, "series", "Doramas & K-Dramas", "BestCine", emptyList()))
+            allProviders.forEach { prov ->
+                add(
+                    BestCineDiscoverCatalogSpec(
+                        id = "$DISCOVER_PROVIDER_PREFIX${prov.id}",
+                        type = "series",
+                        title = prov.displayName,
+                        sourceLabel = "BestCine Streaming",
+                        genreOptions = seriesGenres,
+                    ),
+                )
+            }
+        }
+    }
 
     fun isStreamingKey(key: String): Boolean =
         key.startsWith(KEY_PREFIX)
@@ -502,6 +591,132 @@ object BestCineStreamingCatalogs {
             page = pageNum.coerceAtLeast(1),
             forceRefresh = forceRefresh,
         )
+    }
+
+    suspend fun fetchDiscoverPage(
+        catalogId: String,
+        type: String,
+        genre: String?,
+        skip: Int?,
+        forceRefresh: Boolean = false,
+    ): CatalogPage = withContext(Dispatchers.Default) {
+        val apiKey = TmdbSettingsRepository.effectiveApiKey()
+        if (apiKey.isBlank()) {
+            log.w { "TMDB API key indisponível para Descobrir ($catalogId)" }
+            return@withContext CatalogPage(items = emptyList(), rawItemCount = 0, nextSkip = null)
+        }
+
+        val isSeries = type.equals("series", ignoreCase = true) || type.equals("tv", ignoreCase = true)
+        val mediaKey = if (isSeries) "tv" else "movie"
+        val page = (((skip ?: 0) / TMDB_PAGE_SIZE) + 1).coerceAtLeast(1)
+        val language = normalizeTmdbLanguage(TmdbSettingsRepository.snapshot().language).ifBlank { "pt-BR" }
+        val normalizedGenre = genre?.trim()?.takeIf { it.isNotEmpty() }
+        val genreId = normalizedGenre?.let {
+            if (isSeries) seriesDiscoverGenreIds[it] else movieDiscoverGenreIds[it]
+        }
+        val cacheId = "disc_${catalogId}_${genreId ?: "all"}"
+        val cacheKey = CacheKey(providerId = cacheId, mediaType = mediaKey, page = page, language = language)
+
+        if (!forceRefresh) {
+            cacheMutex.withLock {
+                val cached = pageCache[cacheKey]
+                if (cached != null && cached.createdAt.elapsedNow() < CACHE_TTL) {
+                    return@withContext cached.page
+                }
+            }
+        }
+
+        val endpoint = if (isSeries) "discover/tv" else "discover/movie"
+        val query = linkedMapOf(
+            "language" to language,
+            "sort_by" to "popularity.desc",
+            "include_adult" to "false",
+            "page" to page.toString(),
+        ).apply {
+            when {
+                catalogId == DISCOVER_TOP_RATED_ID -> {
+                    put("sort_by", "vote_average.desc")
+                    put("vote_count.gte", if (isSeries) "200" else "400")
+                    put("region", WATCH_REGION_BR)
+                }
+                catalogId == DISCOVER_RECENT_ID && !isSeries -> {
+                    val todayIso = CurrentDateProvider.todayIsoDate()
+                    val currentYear = todayIso.take(4).toIntOrNull() ?: 2025
+                    put("region", WATCH_REGION_BR)
+                    put("primary_release_date.gte", "${currentYear - 1}-01-01")
+                    put("primary_release_date.lte", todayIso)
+                    put("vote_count.gte", "40")
+                }
+                catalogId == DISCOVER_BRAZIL_ID -> {
+                    put("with_original_language", "pt")
+                    put("with_origin_country", WATCH_REGION_BR)
+                    put("vote_count.gte", "20")
+                }
+                catalogId == DISCOVER_ANIMES_ID -> {
+                    put("with_genres", "16")
+                    put("with_original_language", "ja")
+                    put("vote_count.gte", "40")
+                }
+                catalogId == DISCOVER_DORAMAS_ID -> {
+                    put("with_origin_country", "KR")
+                    put("with_original_language", "ko")
+                    put("vote_count.gte", "30")
+                }
+                catalogId.startsWith(DISCOVER_PROVIDER_PREFIX) -> {
+                    val provId = catalogId.removePrefix(DISCOVER_PROVIDER_PREFIX)
+                    val prov = providerById(provId)
+                    if (prov != null) {
+                        put("watch_region", WATCH_REGION_BR)
+                        put("with_watch_providers", prov.tmdbProviderId.toString())
+                        put("with_watch_monetization_types", prov.monetizationTypes)
+                    }
+                }
+                else -> {
+                    put("region", WATCH_REGION_BR)
+                    put("vote_count.gte", if (isSeries) "50" else "80")
+                }
+            }
+            if (genreId != null) {
+                val existingGenres = get("with_genres")
+                put("with_genres", if (existingGenres.isNullOrBlank()) genreId else "$existingGenres,$genreId")
+            }
+        }
+
+        val url = buildTmdbUrl(endpoint = endpoint, apiKey = apiKey, query = query)
+        val response = runCatching {
+            json.decodeFromString<TmdbStreamingDiscoverResponse>(httpGetText(url))
+        }.onFailure { error ->
+            log.w(error) { "Falha ao carregar Descobrir nativo $cacheId ($mediaKey, página $page)" }
+        }.getOrNull() ?: return@withContext CatalogPage(items = emptyList(), rawItemCount = 0, nextSkip = null)
+
+        val items = response.results
+            .mapNotNull { it.toMetaPreview(isSeries = isSeries) }
+            .distinctBy { it.id }
+
+        val currentPage = response.page ?: page
+        val totalPages = (response.totalPages ?: currentPage).coerceAtMost(25)
+        val nextSkip = if (currentPage < totalPages && items.isNotEmpty()) {
+            currentPage * TMDB_PAGE_SIZE
+        } else {
+            null
+        }
+
+        val catalogPage = CatalogPage(
+            items = items,
+            rawItemCount = items.size,
+            nextSkip = nextSkip,
+        )
+
+        if (items.isNotEmpty()) {
+            cacheMutex.withLock {
+                pageCache[cacheKey] = CachedPage(
+                    page = catalogPage,
+                    createdAt = TimeSource.Monotonic.markNow(),
+                )
+            }
+        }
+
+        catalogPage
     }
 
     suspend fun clearCache() {

@@ -2,6 +2,7 @@ package com.nuvio.app.features.search
 
 import co.touchlab.kermit.Logger
 import com.nuvio.app.bestcine.BestCineSearchEngine
+import com.nuvio.app.bestcine.catalog.BestCineStreamingCatalogs
 import com.nuvio.app.core.i18n.localizedMediaTypeLabel
 import com.nuvio.app.features.addons.AddonCatalog
 import com.nuvio.app.features.addons.AddonExtraProperty
@@ -268,7 +269,8 @@ object SearchRepository {
         val addonManifestErrorMessage = enabledAddons.firstEnabledManifestError()
         val activeAddons = enabledAddons.filter { it.manifest != null }
         val serverLibraries = ServerCatalog.titleLibraries()
-        if (activeAddons.isEmpty() && serverLibraries.isEmpty()) {
+        val nativeDiscoverSources = buildBestCineDiscoverSources()
+        if (nativeDiscoverSources.isEmpty() && activeAddons.isEmpty() && serverLibraries.isEmpty()) {
             activeDiscoverJob?.cancel()
             discoverSources = emptyList()
             lastDiscoverRequestKey = null
@@ -285,7 +287,7 @@ object SearchRepository {
             return
         }
 
-        val sources = buildDiscoverSources(activeAddons) + serverLibraries.filter { it.library.kind != ServerMediaKind.MIXED }.map { ref ->
+        val sources = nativeDiscoverSources + buildDiscoverSources(activeAddons) + serverLibraries.filter { it.library.kind != ServerMediaKind.MIXED }.map { ref ->
             DiscoverCatalogOption(
                 key = ref.target.let { "server:${it.connectionId}:${it.libraryId}" },
                 addonName = ServerRepository.sourceLabel(ref.connection),
@@ -473,13 +475,31 @@ object SearchRepository {
                 }
         }
 
+    private fun buildBestCineDiscoverSources(): List<DiscoverCatalogOption> =
+        BestCineStreamingCatalogs.discoverCatalogs.map { spec ->
+            DiscoverCatalogOption(
+                key = "bestcine_discover:${spec.type}:${spec.id}",
+                addonName = spec.sourceLabel,
+                manifestUrl = BestCineStreamingCatalogs.DISCOVER_MANIFEST_URL,
+                type = spec.type,
+                catalogId = spec.id,
+                catalogName = spec.title,
+                genreOptions = spec.genreOptions,
+                genreRequired = false,
+                supportsPagination = true,
+            )
+        }
+
     private fun buildDiscoverSources(addons: List<ManagedAddon>): List<DiscoverCatalogOption> =
         addons.mapNotNull { addon ->
             val manifest = addon.manifest ?: return@mapNotNull null
             addon to manifest
         }.flatMap { (addon, manifest) ->
             manifest.catalogs
-                .filter { catalog -> catalog.supportsDiscover() }
+                .filter { catalog ->
+                    catalog.supportsDiscover() &&
+                        !(catalog.type.equals("tv", ignoreCase = true) && catalog.id == "bestcine_tv_catalog")
+                }
                 .map { catalog ->
                     val genreExtra = catalog.genreExtra()
                     DiscoverCatalogOption(
@@ -539,7 +559,8 @@ object SearchRepository {
         val current = _discoverUiState.value
         val selectedCatalog = current.selectedCatalog ?: return
         val requestedSkip = if (reset) 0 else current.nextSkip ?: return
-        val requestUrl = if (selectedCatalog.server != null) {
+        val isBestCineDiscover = BestCineStreamingCatalogs.isDiscoverManifestUrl(selectedCatalog.manifestUrl)
+        val requestUrl = if (selectedCatalog.server != null || isBestCineDiscover) {
             selectedCatalog.key
         } else {
             buildCatalogUrl(
@@ -572,6 +593,14 @@ object SearchRepository {
                 val server = selectedCatalog.server
                 if (server != null) {
                     ServerCatalog.page(server, skip = requestedSkip)
+                } else if (isBestCineDiscover) {
+                    BestCineStreamingCatalogs.fetchDiscoverPage(
+                        catalogId = selectedCatalog.catalogId,
+                        type = selectedCatalog.type,
+                        genre = current.selectedGenre,
+                        skip = requestedSkip.takeIf { it > 0 },
+                        forceRefresh = forceRefresh,
+                    )
                 } else {
                     fetchCatalogPage(
                         manifestUrl = selectedCatalog.manifestUrl,
