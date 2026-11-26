@@ -66,6 +66,9 @@ abstract class GenerateRuntimeConfigsTask : DefaultTask() {
     @get:Input
     abstract val tmdbApiKey: Property<String>
 
+    @get:Input
+    abstract val bestCineClientSecret: Property<String>
+
     @TaskAction
     fun generate() {
         val props = Properties()
@@ -110,6 +113,19 @@ abstract class GenerateRuntimeConfigsTask : DefaultTask() {
                 |
                 |object TmdbConfig {
                 |    const val API_KEY = "${tmdbApiKey.get()}"
+                |}
+                """.trimMargin()
+            )
+        }
+
+        outDir.resolve("com/nuvio/app/bestcine").apply {
+            mkdirs()
+            resolve("BestCineClientConfig.kt").writeText(
+                """
+                |package com.nuvio.app.bestcine
+                |
+                |object BestCineClientConfig {
+                |    const val CLIENT_SECRET = "${bestCineClientSecret.get()}"
                 |}
                 """.trimMargin()
             )
@@ -568,6 +584,7 @@ val generateRuntimeConfigs = tasks.register<GenerateRuntimeConfigsTask>("generat
     sentryDsn.set(runtimeConfigValue("SENTRY_DSN"))
     sentryDesktopDsn.set(runtimeConfigValue("SENTRY_DESKTOP_DSN"))
     tmdbApiKey.set(runtimeConfigValue("TMDB_API_KEY"))
+    bestCineClientSecret.set(runtimeConfigValue("BESTCINE_CLIENT_SECRET"))
     sentryEnvironment.set(
         when {
             requestedGradleTasks.any { "benchmark" in it } -> "benchmark"

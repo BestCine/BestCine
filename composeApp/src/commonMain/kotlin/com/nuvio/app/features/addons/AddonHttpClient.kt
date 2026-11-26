@@ -1,16 +1,22 @@
 package com.nuvio.app.features.addons
 
 import com.nuvio.app.bestcine.BestCineAccountRepository
+import com.nuvio.app.bestcine.BestCineHmacSigner
 
 internal suspend fun fetchAddonResponseText(
     url: String,
     forceRefresh: Boolean = false,
 ): String {
+    val bestCineHeaders = BestCineHmacSigner.buildHeadersForUrl(url)
+    val headers = buildMap {
+        if (forceRefresh) put("Cache-Control", "no-cache")
+        putAll(bestCineHeaders)
+    }
     val payload = try {
-        if (forceRefresh) {
+        if (headers.isNotEmpty()) {
             httpGetTextWithHeaders(
                 url = url,
-                headers = mapOf("Cache-Control" to "no-cache"),
+                headers = headers,
             )
         } else {
             httpGetText(url)

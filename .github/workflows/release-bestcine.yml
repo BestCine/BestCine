@@ -79,12 +79,13 @@ jobs:
           INTRODB_API_URL: ${{ secrets.INTRODB_API_URL }}
           IMDB_RATINGS_API_BASE_URL: ${{ secrets.IMDB_RATINGS_API_BASE_URL }}
           IMDB_TAPFRAME_API_BASE_URL: ${{ secrets.IMDB_TAPFRAME_API_BASE_URL }}
+          BESTCINE_CLIENT_SECRET: ${{ secrets.BESTCINE_CLIENT_SECRET }}
         run: |
           $keys = @(
             "TMDB_API_KEY","TRAKT_CLIENT_ID","TRAKT_CLIENT_SECRET","TRAKT_REDIRECT_URI",
             "SIMKL_CLIENT_ID","SIMKL_REDIRECT_URI","SIMKL_APP_NAME","MDBLIST_CLIENT_ID",
             "NUVIO_DISCORD_CLIENT_ID","PREMIUMIZE_CLIENT_ID","INTRODB_API_URL",
-            "IMDB_RATINGS_API_BASE_URL","IMDB_TAPFRAME_API_BASE_URL"
+            "IMDB_RATINGS_API_BASE_URL","IMDB_TAPFRAME_API_BASE_URL","BESTCINE_CLIENT_SECRET"
           )
           $lines = @()
           foreach ($k in $keys) {
@@ -116,6 +117,11 @@ jobs:
           Copy-Item "composeApp\build\compose\binaries\main-release\msi\BestCine-Windows-x64-$ver.msi" "dist-windows\"
           Copy-Item "composeApp\build\compose\binaries\main-release\msi\BestCine-$ver.msi" "dist-windows\"
           Get-ChildItem dist-windows
+
+      - name: Limpar local.properties temporario
+        if: always()
+        shell: pwsh
+        run: Remove-Item -Force -ErrorAction SilentlyContinue local.properties
 
       - name: Upload artefato Windows
         uses: actions/upload-artifact@v4
@@ -167,6 +173,7 @@ jobs:
           INTRODB_API_URL: ${{ secrets.INTRODB_API_URL }}
           IMDB_RATINGS_API_BASE_URL: ${{ secrets.IMDB_RATINGS_API_BASE_URL }}
           IMDB_TAPFRAME_API_BASE_URL: ${{ secrets.IMDB_TAPFRAME_API_BASE_URL }}
+          BESTCINE_CLIENT_SECRET: ${{ secrets.BESTCINE_CLIENT_SECRET }}
         run: |
           set -euo pipefail
           umask 077
@@ -182,7 +189,7 @@ jobs:
             for k in TMDB_API_KEY TRAKT_CLIENT_ID TRAKT_CLIENT_SECRET TRAKT_REDIRECT_URI \
                      SIMKL_CLIENT_ID SIMKL_REDIRECT_URI SIMKL_APP_NAME MDBLIST_CLIENT_ID \
                      NUVIO_DISCORD_CLIENT_ID PREMIUMIZE_CLIENT_ID INTRODB_API_URL \
-                     IMDB_RATINGS_API_BASE_URL IMDB_TAPFRAME_API_BASE_URL; do
+                     IMDB_RATINGS_API_BASE_URL IMDB_TAPFRAME_API_BASE_URL BESTCINE_CLIENT_SECRET; do
               v="${!k:-}"
               if [[ -n "$v" ]]; then echo "$k=$v"; fi
             done
@@ -273,6 +280,7 @@ jobs:
           INTRODB_API_URL: ${{ secrets.INTRODB_API_URL }}
           IMDB_RATINGS_API_BASE_URL: ${{ secrets.IMDB_RATINGS_API_BASE_URL }}
           IMDB_TAPFRAME_API_BASE_URL: ${{ secrets.IMDB_TAPFRAME_API_BASE_URL }}
+          BESTCINE_CLIENT_SECRET: ${{ secrets.BESTCINE_CLIENT_SECRET }}
         run: |
           set -euo pipefail
           trap 'rm -f local.properties' EXIT
@@ -280,7 +288,7 @@ jobs:
             for k in TMDB_API_KEY TRAKT_CLIENT_ID TRAKT_CLIENT_SECRET TRAKT_REDIRECT_URI \
                      SIMKL_CLIENT_ID SIMKL_REDIRECT_URI SIMKL_APP_NAME MDBLIST_CLIENT_ID \
                      NUVIO_DISCORD_CLIENT_ID PREMIUMIZE_CLIENT_ID INTRODB_API_URL \
-                     IMDB_RATINGS_API_BASE_URL IMDB_TAPFRAME_API_BASE_URL; do
+                     IMDB_RATINGS_API_BASE_URL IMDB_TAPFRAME_API_BASE_URL BESTCINE_CLIENT_SECRET; do
               v="${!k:-}"
               if [[ -n "$v" ]]; then echo "$k=$v"; fi
             done
@@ -348,6 +356,7 @@ jobs:
           INTRODB_API_URL: ${{ secrets.INTRODB_API_URL }}
           IMDB_RATINGS_API_BASE_URL: ${{ secrets.IMDB_RATINGS_API_BASE_URL }}
           IMDB_TAPFRAME_API_BASE_URL: ${{ secrets.IMDB_TAPFRAME_API_BASE_URL }}
+          BESTCINE_CLIENT_SECRET: ${{ secrets.BESTCINE_CLIENT_SECRET }}
         run: |
           set -euo pipefail
           trap 'rm -f local.properties' EXIT
@@ -355,7 +364,7 @@ jobs:
             for k in TMDB_API_KEY TRAKT_CLIENT_ID TRAKT_CLIENT_SECRET TRAKT_REDIRECT_URI \
                      SIMKL_CLIENT_ID SIMKL_REDIRECT_URI SIMKL_APP_NAME MDBLIST_CLIENT_ID \
                      NUVIO_DISCORD_CLIENT_ID PREMIUMIZE_CLIENT_ID INTRODB_API_URL \
-                     IMDB_RATINGS_API_BASE_URL IMDB_TAPFRAME_API_BASE_URL; do
+                     IMDB_RATINGS_API_BASE_URL IMDB_TAPFRAME_API_BASE_URL BESTCINE_CLIENT_SECRET; do
               v="${!k:-}"
               if [[ -n "$v" ]]; then echo "$k=$v"; fi
             done
@@ -440,6 +449,7 @@ jobs:
           INTRODB_API_URL: ${{ secrets.INTRODB_API_URL }}
           IMDB_RATINGS_API_BASE_URL: ${{ secrets.IMDB_RATINGS_API_BASE_URL }}
           IMDB_TAPFRAME_API_BASE_URL: ${{ secrets.IMDB_TAPFRAME_API_BASE_URL }}
+          BESTCINE_CLIENT_SECRET: ${{ secrets.BESTCINE_CLIENT_SECRET }}
         run: |
           set -euo pipefail
           xcodebuild -version
@@ -449,7 +459,7 @@ jobs:
             for k in TMDB_API_KEY TRAKT_CLIENT_ID TRAKT_CLIENT_SECRET TRAKT_REDIRECT_URI \
                      SIMKL_CLIENT_ID SIMKL_REDIRECT_URI SIMKL_APP_NAME MDBLIST_CLIENT_ID \
                      NUVIO_DISCORD_CLIENT_ID PREMIUMIZE_CLIENT_ID INTRODB_API_URL \
-                     IMDB_RATINGS_API_BASE_URL IMDB_TAPFRAME_API_BASE_URL; do
+                     IMDB_RATINGS_API_BASE_URL IMDB_TAPFRAME_API_BASE_URL BESTCINE_CLIENT_SECRET; do
               v="${!k:-}"
               if [[ -n "$v" ]]; then echo "$k=$v"; fi
             done

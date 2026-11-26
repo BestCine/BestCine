@@ -234,9 +234,17 @@ private fun CoroutineScope.launchStreamSearchTasks(
     val log = Logger.withTag("StreamSearch")
     targets.streamAddons.forEach { addon ->
         launch {
+            val resourceName = if (
+                addon.manifest.transportUrl.contains("/bc_") &&
+                (targets.type == "movie" || targets.type == "series")
+            ) {
+                "bestcine-vod/stream"
+            } else {
+                "stream"
+            }
             val url = buildAddonResourceUrl(
                 manifestUrl = addon.manifest.transportUrl,
-                resource = "stream",
+                resource = resourceName,
                 type = targets.type,
                 id = targets.videoId,
             )

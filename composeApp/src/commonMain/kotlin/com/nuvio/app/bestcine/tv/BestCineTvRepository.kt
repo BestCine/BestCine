@@ -277,7 +277,7 @@ object BestCineTvRepository {
             return
         }
 
-        val metaUrl = "$addonBaseUrl/meta/tv/${channel.id}.json"
+        val metaUrl = "$addonBaseUrl/bestcine-tv/meta/${channel.id}.json"
         val fetched = runCatching {
             withContext(Dispatchers.Default) {
                 val payload = fetchAddonResponseText(metaUrl, forceRefresh = false)
