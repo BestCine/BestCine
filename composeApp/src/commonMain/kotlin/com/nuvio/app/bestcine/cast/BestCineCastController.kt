@@ -128,6 +128,7 @@ object BestCineCastController {
                 }.awaitAll()
                     .filterNotNull()
                     .distinctBy { it.avTransportControlUrl }
+                    .distinctBy { it.id }
                     .sortedBy { it.friendlyName.lowercase() }
 
                 _state.update { current ->

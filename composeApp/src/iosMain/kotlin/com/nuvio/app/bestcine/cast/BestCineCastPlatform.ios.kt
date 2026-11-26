@@ -24,7 +24,9 @@ import kotlinx.cinterop.ExperimentalForeignApi
 import kotlinx.cinterop.IntVar
 import kotlinx.cinterop.addressOf
 import kotlinx.cinterop.alloc
+import kotlinx.cinterop.allocArray
 import kotlinx.cinterop.convert
+import kotlinx.cinterop.get
 import kotlinx.cinterop.memScoped
 import kotlinx.cinterop.ptr
 import kotlinx.cinterop.reinterpret
@@ -37,6 +39,7 @@ import kotlinx.coroutines.IO
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -44,16 +47,25 @@ import kotlinx.coroutines.withContext
 import platform.Foundation.NSDate
 import platform.Foundation.timeIntervalSince1970
 import platform.posix.AF_INET
+import platform.posix.F_GETFL
+import platform.posix.F_SETFL
+import platform.posix.O_NONBLOCK
+import platform.posix.POLLERR
+import platform.posix.POLLHUP
 import platform.posix.POLLIN
+import platform.posix.POLLOUT
 import platform.posix.SOCK_DGRAM
 import platform.posix.SOCK_STREAM
 import platform.posix.SOL_SOCKET
+import platform.posix.SO_ERROR
 import platform.posix.SO_REUSEADDR
 import platform.posix.accept
 import platform.posix.bind
 import platform.posix.close
 import platform.posix.connect
+import platform.posix.fcntl
 import platform.posix.getsockname
+import platform.posix.getsockopt
 import platform.posix.listen
 import platform.posix.poll
 import platform.posix.pollfd
@@ -98,9 +110,52 @@ internal actual object BestCineCastPlatform {
     actual fun openSystemScreenCastSettings(): Boolean = false
 
     actual suspend fun discoverSsdpLocations(timeoutMs: Long): List<String> = withContext(Dispatchers.IO) {
+        // No iOS 14+, multicast UDP (239.255.255.250:1900) exige o entitlement restrito
+        // com.apple.developer.networking.multicast (indisponivel em contas pessoais SideStore/AltStore).
+        // Por isso combinamos em paralelo:
+        //  1) SSDP multicast padrao (funciona se autorizado pelo sistema);
+        //  2) SSDP M-SEARCH unicast na sub-rede /24 local (nao exige entitlement multicast);
+        //  3) Varredura TCP nao-bloqueante nas portas DLNA conhecidas de Smart TVs (Samsung, Sony, LG, Android TV, TCL/Hisense).
+        val lanIp = resolveLocalLanIpv4("192.168.1.1")
+            ?: resolveLocalLanIpv4("10.0.0.1")
+            ?: resolveLocalLanIpv4("1.1.1.1")
+        val lanParts = lanIp?.split('.')?.takeIf { it.size == 4 }
+        val subnetPrefix = lanParts?.let { "${it[0]}.${it[1]}.${it[2]}" }
+        val selfOctet = lanParts?.getOrNull(3)?.toIntOrNull() ?: -1
+
+        val found = linkedSetOf<String>()
+        coroutineScope {
+            val udpJob = async(Dispatchers.IO) {
+                discoverViaUdpSsdp(
+                    timeoutMs = timeoutMs,
+                    subnetPrefix = subnetPrefix,
+                    selfOctet = selfOctet,
+                )
+            }
+            val tcpJob = async(Dispatchers.IO) {
+                if (subnetPrefix != null) {
+                    discoverViaLanTcpProbe(
+                        subnetPrefix = subnetPrefix,
+                        selfOctet = selfOctet,
+                    )
+                } else {
+                    emptyList()
+                }
+            }
+            found.addAll(udpJob.await())
+            found.addAll(tcpJob.await())
+        }
+        found.toList()
+    }
+
+    private fun discoverViaUdpSsdp(
+        timeoutMs: Long,
+        subnetPrefix: String?,
+        selfOctet: Int,
+    ): List<String> {
         val found = linkedSetOf<String>()
         val fd = socket(AF_INET, SOCK_DGRAM, 0)
-        if (fd < 0) return@withContext emptyList()
+        if (fd < 0) return emptyList()
 
         try {
             val searchTargets = listOf(
@@ -117,10 +172,9 @@ internal actual object BestCineCastPlatform {
                 dest.sin_len = sizeOf<sockaddr_in>().toUByte()
                 dest.sin_family = AF_INET.toUByte()
                 dest.sin_port = portBe
-                dest.sin_addr.s_addr = multicastAddrBe
 
-                searchTargets.forEach { st ->
-                    val msg = buildString {
+                val payloads = searchTargets.map { st ->
+                    buildString {
                         append("M-SEARCH * HTTP/1.1\r\n")
                         append("HOST: 239.255.255.250:1900\r\n")
                         append("MAN: \"ssdp:discover\"\r\n")
@@ -128,7 +182,11 @@ internal actual object BestCineCastPlatform {
                         append("ST: $st\r\n")
                         append("\r\n")
                     }.encodeToByteArray()
+                }
 
+                // 1) Multicast padrao
+                dest.sin_addr.s_addr = multicastAddrBe
+                payloads.forEach { msg ->
                     msg.usePinned { pinned ->
                         sendto(
                             fd,
@@ -138,6 +196,26 @@ internal actual object BestCineCastPlatform {
                             dest.ptr.reinterpret(),
                             sizeOf<sockaddr_in>().convert(),
                         )
+                    }
+                }
+
+                // 2) Unicast direto na sub-rede /24 local (funciona no iOS 14+ sem entitlement multicast)
+                if (subnetPrefix != null) {
+                    val primaryPayload = payloads.first()
+                    primaryPayload.usePinned { pinned ->
+                        for (host in 1..254) {
+                            if (host == selfOctet) continue
+                            val addrBe = parseIpv4ToNetworkOrder("$subnetPrefix.$host") ?: continue
+                            dest.sin_addr.s_addr = addrBe
+                            sendto(
+                                fd,
+                                pinned.addressOf(0),
+                                primaryPayload.size.convert(),
+                                0,
+                                dest.ptr.reinterpret(),
+                                sizeOf<sockaddr_in>().convert(),
+                            )
+                        }
                     }
                 }
 
@@ -172,7 +250,126 @@ internal actual object BestCineCastPlatform {
             close(fd)
         }
 
-        found.toList()
+        return found.toList()
+    }
+
+    private suspend fun discoverViaLanTcpProbe(
+        subnetPrefix: String,
+        selfOctet: Int,
+    ): List<String> = coroutineScope {
+        val portSpecs = listOf(
+            9197 to listOf("/dmr"),
+            7676 to listOf("/smp_15_", "/smp_2_", "/smp_7_", "/smp_10_", "/smp_22_"),
+            52235 to listOf("/dmr/SamsungMRDesc.xml"),
+            52323 to listOf("/dmr.xml"),
+            49152 to listOf("/description.xml", "/rootDesc.xml"),
+            38400 to listOf("/description.xml"),
+        )
+        val hosts = (1..254).filter { it != selfOctet }.map { "$subnetPrefix.$it" }
+
+        portSpecs.map { (port, paths) ->
+            async(Dispatchers.IO) {
+                val openIps = probeTcpPortOnHosts(hosts = hosts, port = port, batchSize = 16, timeoutMs = 180)
+                buildList {
+                    for (ip in openIps) {
+                        for (path in paths) {
+                            add("http://$ip:$port$path")
+                        }
+                    }
+                }
+            }
+        }.awaitAll().flatten()
+    }
+
+    private fun probeTcpPortOnHosts(
+        hosts: List<String>,
+        port: Int,
+        batchSize: Int,
+        timeoutMs: Int,
+    ): List<String> {
+        val openIps = mutableListOf<String>()
+        val portBe = toNetworkPortOrder(port)
+
+        for (batch in hosts.chunked(batchSize)) {
+            memScoped {
+                val fds = IntArray(batch.size) { -1 }
+                val pfds = allocArray<pollfd>(batch.size)
+                var pendingCount = 0
+
+                try {
+                    for (idx in batch.indices) {
+                        val ip = batch[idx]
+                        val ipBe = parseIpv4ToNetworkOrder(ip)
+                        if (ipBe == null) {
+                            pfds[idx].fd = -1
+                            pfds[idx].events = 0.toShort()
+                            pfds[idx].revents = 0.toShort()
+                            continue
+                        }
+
+                        val fd = socket(AF_INET, SOCK_STREAM, 0)
+                        if (fd < 0) {
+                            pfds[idx].fd = -1
+                            pfds[idx].events = 0.toShort()
+                            pfds[idx].revents = 0.toShort()
+                            continue
+                        }
+
+                        val flags = fcntl(fd, F_GETFL, 0)
+                        if (flags >= 0) {
+                            fcntl(fd, F_SETFL, flags or O_NONBLOCK)
+                        }
+
+                        val remote = alloc<sockaddr_in>()
+                        remote.sin_len = sizeOf<sockaddr_in>().toUByte()
+                        remote.sin_family = AF_INET.toUByte()
+                        remote.sin_port = portBe
+                        remote.sin_addr.s_addr = ipBe
+
+                        val rc = connect(fd, remote.ptr.reinterpret(), sizeOf<sockaddr_in>().convert())
+                        if (rc == 0) {
+                            openIps.add(ip)
+                            close(fd)
+                            pfds[idx].fd = -1
+                            pfds[idx].events = 0.toShort()
+                            pfds[idx].revents = 0.toShort()
+                        } else {
+                            fds[idx] = fd
+                            pfds[idx].fd = fd
+                            pfds[idx].events = POLLOUT.convert()
+                            pfds[idx].revents = 0.toShort()
+                            pendingCount += 1
+                        }
+                    }
+
+                    if (pendingCount > 0) {
+                        val ready = poll(pfds, batch.size.toUInt(), timeoutMs)
+                        if (ready > 0) {
+                            val soErr = alloc<IntVar>()
+                            val soLen = alloc<socklen_tVar>()
+                            for (idx in batch.indices) {
+                                val fd = fds[idx]
+                                if (fd < 0) continue
+                                val revents = pfds[idx].revents.toInt()
+                                if ((revents and POLLOUT) != 0 && (revents and (POLLERR or POLLHUP)) == 0) {
+                                    soErr.value = -1
+                                    soLen.value = sizeOf<IntVar>().convert()
+                                    if (getsockopt(fd, SOL_SOCKET, SO_ERROR, soErr.ptr, soLen.ptr) == 0 && soErr.value == 0) {
+                                        openIps.add(batch[idx])
+                                    }
+                                }
+                            }
+                        }
+                    }
+                } finally {
+                    for (fd in fds) {
+                        if (fd >= 0) close(fd)
+                    }
+                }
+            }
+        }
+
+        return openIps
     }
 
     @Volatile
@@ -252,6 +449,9 @@ private fun resolveLocalLanIpv4(targetHostIp: String?): String? = memScoped {
         close(fd)
     }
 }
+
+private fun toNetworkPortOrder(port: Int): UShort =
+    (((port and 0xFF) shl 8) or ((port ushr 8) and 0xFF)).toUShort()
 
 private fun parseIpv4ToNetworkOrder(ip: String?): UInt? {
     val parts = ip?.trim()?.split('.') ?: return null

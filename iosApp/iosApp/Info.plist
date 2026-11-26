@@ -52,7 +52,14 @@
 		</dict>
 	</array>
 	<key>NSLocalNetworkUsageDescription</key>
-	<string>BestCine connects to media servers on your local network.</string>
+	<string>O BestCine precisa acessar sua rede local Wi-Fi para encontrar Smart TVs (DLNA) e servidores de mídia.</string>
+	<key>NSBonjourServices</key>
+	<array>
+		<string>_googlecast._tcp</string>
+		<string>_airplay._tcp</string>
+		<string>_dial._tcp</string>
+		<string>_http._tcp</string>
+	</array>
 	<key>NSAppTransportSecurity</key>
 	<dict>
 		<key>NSAllowsArbitraryLoads</key>
