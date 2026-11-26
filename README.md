@@ -46,6 +46,8 @@
 | 📺 **Smart TV Samsung (Tizen) ou Smart TV LG (webOS)** | 👉 **[📺 ABRIR PÁGINA DO BESTCINE TV (LG &amp; SAMSUNG)](https://github.com/BestCine/BestCine-TV)** |
 
 > 🔄 **Atualização Automática:** se você já tem o BestCine instalado no Windows ou no Celular Android, basta abrir o app para receber o aviso e atualizar automaticamente!
+>
+> 🍎 **macOS (1ª abertura — Gatekeeper da Apple):** por ser um app open-source fora da App Store, o macOS pode exibir o aviso *"A Apple não pôde verificar se o item está livre de malware"*. Arraste o **BestCine** para **Aplicativos**, clique em **OK** (não mova para a Lixeira) e vá em **Ajustes do Sistema › Privacidade e Segurança › Abrir Mesmo Assim** *(ou execute `xattr -cr /Applications/BestCine.app` no Terminal)*.
 
 ---
 
