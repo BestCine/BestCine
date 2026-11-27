@@ -14,7 +14,10 @@ internal fun List<TmdbImage>.selectBestLocalizedImagePath(normalizedLanguage: St
     val languageCode = normalizedLanguage.substringBefore("-")
     val regionCode = normalizedLanguage.substringAfter("-", "").uppercase().takeIf { it.length == 2 }
         ?: defaultLanguageRegions[languageCode]
-    return filter { !it.filePath.isNullOrBlank() }.sortedWith(
+    return filter {
+        val path = it.filePath?.trim().orEmpty()
+        path.isNotBlank() && !path.endsWith(".svg", ignoreCase = true)
+    }.sortedWith(
         compareByDescending<TmdbImage> { it.iso6391 == languageCode && it.iso31661 == regionCode }
             .thenByDescending { it.iso6391 == languageCode && it.iso31661 == null }
             .thenByDescending { it.iso6391 == languageCode }

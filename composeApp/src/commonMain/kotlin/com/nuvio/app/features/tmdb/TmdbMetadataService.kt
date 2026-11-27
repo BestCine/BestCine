@@ -56,6 +56,91 @@ object TmdbMetadataService {
     private val backdropCache = linkedMapOf<String, String?>()
     private val backdropCacheMutex = Mutex()
     private val backdropRequests = Semaphore(4)
+    private val logoCache = linkedMapOf<String, String?>()
+    private val logoCacheLock = SynchronizedObject()
+    private val logoRequests = Semaphore(4)
+
+    fun cachedLocalizedLogo(id: String, type: String, language: String): String? {
+        val mediaType = TmdbService.normalizeMediaType(type)
+        if (mediaType != "movie" && mediaType != "tv") return null
+        val normalizedLanguage = normalizeTmdbLanguage(language)
+        val rawKey = "$id:$mediaType:$normalizedLanguage"
+        val directTmdbId = id.removePrefix("tmdb:").takeIf { id.startsWith("tmdb:") && it.isNotEmpty() && it.all(Char::isDigit) }
+        val tmdbKey = directTmdbId?.let { "$it:$mediaType:$normalizedLanguage" }
+        synchronized(logoCacheLock) {
+            if (logoCache.containsKey(rawKey)) return logoCache[rawKey]
+            if (tmdbKey != null && logoCache.containsKey(tmdbKey)) return logoCache[tmdbKey]
+        }
+        if (directTmdbId != null) {
+            val prefix = "$directTmdbId:$mediaType:"
+            synchronized(enrichmentCacheLock) {
+                enrichmentCache.entries.firstOrNull { it.key.startsWith(prefix) }?.value?.logo
+                    ?.takeIf { it.isNotBlank() }
+                    ?.let { return it }
+            }
+        }
+        return null
+    }
+
+    suspend fun fetchLocalizedLogo(id: String, type: String, language: String): String? =
+        withContext(Dispatchers.Default) {
+            val mediaType = TmdbService.normalizeMediaType(type)
+            if (mediaType != "movie" && mediaType != "tv") return@withContext null
+            val normalizedLanguage = normalizeTmdbLanguage(language)
+            val rawKey = "$id:$mediaType:$normalizedLanguage"
+            synchronized(logoCacheLock) {
+                if (logoCache.containsKey(rawKey)) return@withContext logoCache[rawKey]
+            }
+            logoRequests.withPermit {
+                synchronized(logoCacheLock) {
+                    if (logoCache.containsKey(rawKey)) return@withPermit logoCache[rawKey]
+                }
+                val tmdbId = TmdbService.ensureTmdbId(id, mediaType) ?: run {
+                    synchronized(logoCacheLock) {
+                        logoCache[rawKey] = null
+                        if (logoCache.size > 512) logoCache.remove(logoCache.keys.first())
+                    }
+                    return@withPermit null
+                }
+                val tmdbKey = "$tmdbId:$mediaType:$normalizedLanguage"
+                synchronized(logoCacheLock) {
+                    if (logoCache.containsKey(tmdbKey)) {
+                        val hit = logoCache[tmdbKey]
+                        logoCache[rawKey] = hit
+                        return@withPermit hit
+                    }
+                }
+                val enrichmentLogo = synchronized(enrichmentCacheLock) {
+                    enrichmentCache.entries
+                        .firstOrNull { it.key.startsWith("$tmdbId:$mediaType:") }
+                        ?.value
+                        ?.logo
+                        ?.takeIf { it.isNotBlank() }
+                }
+                if (enrichmentLogo != null) {
+                    synchronized(logoCacheLock) {
+                        logoCache[tmdbKey] = enrichmentLogo
+                        logoCache[rawKey] = enrichmentLogo
+                        if (logoCache.size > 512) logoCache.remove(logoCache.keys.first())
+                    }
+                    return@withPermit enrichmentLogo
+                }
+                val images = fetch<TmdbImagesResponse>(
+                    endpoint = "$mediaType/$tmdbId/images",
+                    query = mapOf("include_image_language" to tmdbImageLanguages(normalizedLanguage)),
+                ) ?: return@withPermit null
+                val logo = buildImageUrl(
+                    images.logos.selectBestLocalizedImagePath(normalizedLanguage),
+                    "w500",
+                )
+                synchronized(logoCacheLock) {
+                    logoCache[tmdbKey] = logo
+                    logoCache[rawKey] = logo
+                    while (logoCache.size > 512) logoCache.remove(logoCache.keys.first())
+                }
+                logo
+            }
+        }
 
     suspend fun fetchLocalizedBackdrop(id: String, type: String, language: String): String? =
         withContext(Dispatchers.Default) {
@@ -76,9 +161,19 @@ object TmdbMetadataService {
                     images.backdrops.selectBestLocalizedImagePath(normalizedLanguage),
                     "w1280",
                 )
+                val logo = buildImageUrl(
+                    images.logos.selectBestLocalizedImagePath(normalizedLanguage),
+                    "w500",
+                )
                 backdropCacheMutex.withLock {
                     backdropCache[cacheKey] = backdrop
                     if (backdropCache.size > 256) backdropCache.remove(backdropCache.keys.first())
+                }
+                synchronized(logoCacheLock) {
+                    if (!logoCache.containsKey(cacheKey)) {
+                        logoCache[cacheKey] = logo
+                        while (logoCache.size > 512) logoCache.remove(logoCache.keys.first())
+                    }
                 }
                 backdrop
             }

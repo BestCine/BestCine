@@ -118,11 +118,13 @@ import com.nuvio.app.bestcine.cast.BestCineCastDialog
 import com.nuvio.app.bestcine.cast.BestCineCastMedia
 import com.nuvio.app.bestcine.cast.BestCineCastPlayerLockOverlay
 import com.nuvio.app.isDesktop
+import com.nuvio.app.core.ui.LocalNuvioBottomNavigationOverlayPadding
 import com.nuvio.app.core.ui.NuvioLoadingIndicator
 import com.nuvio.app.core.ui.PlatformBackHandler
 import com.nuvio.app.core.ui.isFullscreenActionActive
 import com.nuvio.app.core.ui.isFullscreenActionSupported
 import com.nuvio.app.core.ui.nuvio
+import com.nuvio.app.core.ui.nuvioSafeBottomPadding
 import com.nuvio.app.core.ui.toggleFullscreenAction
 import com.nuvio.app.features.player.GestureFeedbackIcon
 import com.nuvio.app.features.player.GestureFeedbackState
@@ -401,6 +403,11 @@ internal fun BestCineTvScreen(
         animationSpec = tween(durationMillis = 220, easing = FastOutSlowInEasing),
         label = "tv_content_vertical_padding",
     )
+    val bottomNavOverlayPadding = if (!isFullscreen && LocalNuvioBottomNavigationOverlayPadding.current > 0.dp) {
+        nuvioSafeBottomPadding()
+    } else {
+        0.dp
+    }
 
     BoxWithConstraints(
         modifier = modifier
@@ -440,13 +447,27 @@ internal fun BestCineTvScreen(
             // ============================================================
             // ÁREA PRINCIPAL (DIREITA): GRADE OU PLAYER EMBUTIDO + CANAIS
             // ============================================================
+            val horizontalContentPadding = if (isFullscreen) {
+                0.dp
+            } else if (isCompactMobile) {
+                12.dp
+            } else {
+                animatedContentHorizontalPadding
+            }
+            val bottomContentPadding = if (isFullscreen || bottomNavOverlayPadding > 0.dp) {
+                0.dp
+            } else {
+                animatedContentVerticalPadding
+            }
             Column(
                 modifier = Modifier
                     .weight(1f)
                     .fillMaxHeight()
                     .padding(
-                        horizontal = if (isFullscreen) 0.dp else if (isCompactMobile) 12.dp else animatedContentHorizontalPadding,
-                        vertical = animatedContentVerticalPadding,
+                        start = horizontalContentPadding,
+                        end = horizontalContentPadding,
+                        top = animatedContentVerticalPadding,
+                        bottom = bottomContentPadding,
                     ),
             ) {
                 AnimatedVisibility(
@@ -705,6 +726,7 @@ internal fun BestCineTvScreen(
                         isSelectedTab = isSelectedTab,
                         isFullscreen = isFullscreen,
                         isCompactMobile = isCompactMobile,
+                        bottomOverlayPadding = bottomNavOverlayPadding,
                         epgBrtMinute = epgBrtMinute,
                         channels = filteredChannels.ifEmpty { uiState.channels },
                         favoriteChannelIds = uiState.favoriteChannelIds,
@@ -755,7 +777,13 @@ internal fun BestCineTvScreen(
                         LazyVerticalGrid(
                             columns = GridCells.Adaptive(minSize = if (isCompactMobile) 140.dp else 158.dp),
                             modifier = Modifier.fillMaxSize(),
-                            contentPadding = PaddingValues(bottom = if (isCompactMobile) 92.dp else 24.dp),
+                            contentPadding = PaddingValues(
+                                bottom = if (bottomNavOverlayPadding > 0.dp) {
+                                    bottomNavOverlayPadding + 16.dp
+                                } else {
+                                    24.dp
+                                },
+                            ),
                             horizontalArrangement = Arrangement.spacedBy(10.dp),
                             verticalArrangement = Arrangement.spacedBy(10.dp),
                         ) {
@@ -781,7 +809,13 @@ internal fun BestCineTvScreen(
                             exit = fadeOut(tween(180)),
                             modifier = Modifier
                                 .align(Alignment.BottomCenter)
-                                .padding(bottom = if (isCompactMobile) 92.dp else 20.dp),
+                                .padding(
+                                    bottom = if (bottomNavOverlayPadding > 0.dp) {
+                                        bottomNavOverlayPadding + 12.dp
+                                    } else {
+                                        20.dp
+                                    },
+                                ),
                         ) {
                             Surface(
                                 shape = RoundedCornerShape(999.dp),
@@ -906,6 +940,7 @@ private fun BestCineTvSplitPlayerLayout(
     onToggleFullscreen: () -> Unit,
     onClosePlayer: () -> Unit,
     isCompactMobile: Boolean = false,
+    bottomOverlayPadding: Dp = 0.dp,
 ) {
     val tokens = MaterialTheme.nuvio
     val currentStream = activeStreams.getOrNull(activeStreamIndex) ?: activeStreams.firstOrNull() ?: return
@@ -1292,7 +1327,9 @@ private fun BestCineTvSplitPlayerLayout(
                 .fillMaxHeight(),
         ) {
             val previewHeight = if (isCompactMobile) {
-                (maxWidth * 9f / 16f).coerceIn(190.dp, 240.dp)
+                val aspectTarget = (maxWidth * 9f / 16f).coerceIn(180.dp, 230.dp)
+                val maxAllowedForEpg = ((maxHeight - bottomOverlayPadding) * 0.38f).coerceAtLeast(168.dp)
+                minOf(aspectTarget, maxAllowedForEpg)
             } else {
                 val aspectTarget = maxWidth * 9f / 16f
                 val maxAllowedForEpg = (maxHeight * 0.49f).coerceIn(245.dp, 385.dp)
@@ -2191,10 +2228,11 @@ private fun BestCineTvSplitPlayerLayout(
                             epgDetails = activeEpgDetails,
                             epgBrtMinute = epgBrtMinute,
                             isLoading = isLoadingEpg,
-                            bottomExtraPadding = if (isCompactMobile) 92.dp else 14.dp,
+                            bottomExtraPadding = 16.dp,
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .weight(1f),
+                                .weight(1f)
+                                .padding(bottom = bottomOverlayPadding),
                         )
                     }
                 }
@@ -2229,6 +2267,10 @@ private fun BestCineTvEpgPanel(
     modifier: Modifier = Modifier,
 ) {
     val tokens = MaterialTheme.nuvio
+    val epgScrollState = rememberScrollState()
+    LaunchedEffect(channel.id) {
+        epgScrollState.scrollTo(0)
+    }
 
     Surface(
         shape = RoundedCornerShape(14.dp),
@@ -2239,7 +2281,7 @@ private fun BestCineTvEpgPanel(
         Column(
             modifier = Modifier
                 .fillMaxSize()
-                .verticalScroll(rememberScrollState())
+                .verticalScroll(epgScrollState)
                 .padding(start = 16.dp, end = 16.dp, top = 14.dp, bottom = bottomExtraPadding),
             verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {
