@@ -80,7 +80,10 @@ internal fun mergeRemoteAndLocalForSafePush(
     for (addon in localExternalCatalogAddons) {
         if (isBestCineUrl(addon.manifestUrl)) continue
         if (addon.manifest != null && !addon.manifest.isCatalogOnlyAllowed) continue
-        localByKey.putIfAbsent(canonicalAddonKey(addon.manifestUrl), addon)
+        val key = canonicalAddonKey(addon.manifestUrl)
+        if (key !in localByKey) {
+            localByKey[key] = addon
+        }
     }
 
     val matchedLocalKeys = mutableSetOf<String>()
