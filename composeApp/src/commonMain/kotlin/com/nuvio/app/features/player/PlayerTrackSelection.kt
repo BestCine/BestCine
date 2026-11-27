@@ -11,6 +11,7 @@ internal fun buildAddonSubtitleFetchKey(
 ): String? {
     val normalizedType = type?.takeIf { it.isNotBlank() } ?: return null
     val normalizedVideoId = videoId?.takeIf { it.isNotBlank() } ?: return null
+    if (com.nuvio.app.features.servers.ServerItemRef.isServerId(normalizedVideoId)) return null
     val compatibleSubtitleAddons = addons.enabledAddons().mapNotNull { addon ->
         val manifest = addon.manifest ?: return@mapNotNull null
         val supportsSubtitles = manifest.resources.any { resource ->
@@ -21,6 +22,18 @@ internal fun buildAddonSubtitleFetchKey(
         }
         if (!supportsSubtitles) return@mapNotNull null
         "${manifest.id}:${manifest.transportUrl}"
+    }.toMutableList()
+
+    val canonicalType = canonicalSubtitleType(normalizedType)
+    val supportsBuiltinOpenSubtitles = (canonicalType == "movie" || canonicalType == "series") &&
+        (normalizedVideoId.startsWith("tt", ignoreCase = true) ||
+            normalizedVideoId.startsWith("tmdb:", ignoreCase = true))
+    if (supportsBuiltinOpenSubtitles && compatibleSubtitleAddons.none {
+            it.contains("opensubtitlesv3", ignoreCase = true) ||
+                it.contains("opensubtitles-v3.strem.io", ignoreCase = true)
+        }
+    ) {
+        compatibleSubtitleAddons.add("org.stremio.opensubtitlesv3:builtin")
     }
 
     if (compatibleSubtitleAddons.isEmpty()) return null

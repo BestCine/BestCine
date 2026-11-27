@@ -123,7 +123,6 @@ private fun watchPartyRow(onClick: () -> Unit): (() -> Unit)? {
 
 private fun SettingsPage.isEnabledByPolicy(): Boolean =
     when (this) {
-        SettingsPage.Addons,
         SettingsPage.Plugins,
         SettingsPage.MediaServers,
         SettingsPage.MediaServer,

@@ -1383,6 +1383,8 @@ const appendSubtitleOptionRow = option => {
   addonSubtitleList.appendChild(row);
 };
 
+let autoFocusLoadedSubtitleLanguage = false;
+
 const appendSubtitleOptionsEmptyState = (label, fetch = false) => {
   if (!fetch) {
     appendEmptyTrackState(addonSubtitleList, label);
@@ -1393,6 +1395,7 @@ const appendSubtitleOptionsEmptyState = (label, fetch = false) => {
   row.className = "track-row subtitle-fetch-row";
   row.addEventListener("click", event => {
     event.stopPropagation();
+    autoFocusLoadedSubtitleLanguage = true;
     send("fetchAddonSubtitles", 0);
   });
   const labelElement = document.createElement("span");
@@ -1406,9 +1409,15 @@ const renderSubtitleSelectionRails = () => {
   const options = subtitleSelectionOptions();
   const languages = subtitleLanguages();
   const selected = selectedSubtitleOption(options);
+  const firstAvailableLanguage = languages.find(language => language.key !== "__off__");
   if (!languages.some(language => language.key === activeSubtitleLanguageKey)) {
     const selectedLanguage = languages.find(language => language.selected);
-    activeSubtitleLanguageKey = selectedLanguage ? selectedLanguage.key : (selected ? selected.languageKey : "__off__");
+    activeSubtitleLanguageKey = selectedLanguage
+      ? selectedLanguage.key
+      : (selected ? selected.languageKey : (firstAvailableLanguage ? firstAvailableLanguage.key : "__off__"));
+  } else if (autoFocusLoadedSubtitleLanguage && activeSubtitleLanguageKey === "__off__" && firstAvailableLanguage) {
+    activeSubtitleLanguageKey = firstAvailableLanguage.key;
+    autoFocusLoadedSubtitleLanguage = false;
   }
   if (!pendingSubtitleOptionId && selected && selected.languageKey === activeSubtitleLanguageKey) {
     pendingSubtitleOptionId = selected.id;
@@ -1417,7 +1426,7 @@ const renderSubtitleSelectionRails = () => {
   languages.forEach(appendSubtitleLanguageRow);
   addonSubtitleList.textContent = "";
   const activeOptions = options.filter(option => option.languageKey === activeSubtitleLanguageKey);
-  if (activeSubtitleLanguageKey === "__off__") {
+  if (activeSubtitleLanguageKey === "__off__" && languages.length > 1) {
     appendSubtitleOptionsEmptyState(state.noneLabel || "None");
   } else if (activeOptions.length > 0) {
     activeOptions.forEach(appendSubtitleOptionRow);

@@ -91,8 +91,12 @@ object BestCineDnsSettingsRepository {
         _state.update { it.copy(proxyVideoViaDoh = enabled) }
     }
 
-    suspend fun runDiagnosticTest(hostname: String = "example.invalid") {
+    suspend fun runDiagnosticTest(hostname: String = com.nuvio.app.bestcine.BestCineBranding.PRODUCTION_HOST) {
         ensureLoaded()
+        if (hostname.isBlank()) {
+            _state.update { it.copy(isTesting = false, lastTestResult = "Servidor não configurado neste build.") }
+            return
+        }
         _state.update { it.copy(isTesting = true, lastTestResult = "Testando resolução DNS...") }
         val result = BestCineDnsPlatform.testDnsResolution(hostname)
         _state.update { it.copy(isTesting = false, lastTestResult = result) }

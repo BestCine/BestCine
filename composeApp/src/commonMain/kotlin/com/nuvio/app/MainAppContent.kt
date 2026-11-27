@@ -789,7 +789,17 @@ internal fun MainAppContent(
                     }
 
                     is AppDeepLink.AddonInstall -> {
-                        NuvioToastController.show("Aplicativo exclusivo BestCine: instalação de addons externos desativada.")
+                        when (val result = com.nuvio.app.features.addons.AddonRepository.addAddon(deepLink.manifestUrl)) {
+                            is com.nuvio.app.features.addons.AddAddonResult.Success -> {
+                                NuvioToastController.show("Addon \"${result.manifest.name}\" instalado com sucesso.")
+                            }
+                            is com.nuvio.app.features.addons.AddAddonResult.TrackingConsentRequired -> {
+                                NuvioToastController.show("Abra Configurações → Conteúdo e descoberta → Addons para confirmar \"${result.manifest.name}\".")
+                            }
+                            is com.nuvio.app.features.addons.AddAddonResult.Error -> {
+                                NuvioToastController.show(result.message)
+                            }
+                        }
                         AppDeepLinkRepository.markConsumed(deepLink)
                     }
 

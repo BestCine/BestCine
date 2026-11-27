@@ -80,12 +80,16 @@ jobs:
           IMDB_RATINGS_API_BASE_URL: ${{ secrets.IMDB_RATINGS_API_BASE_URL }}
           IMDB_TAPFRAME_API_BASE_URL: ${{ secrets.IMDB_TAPFRAME_API_BASE_URL }}
           BESTCINE_CLIENT_SECRET: ${{ secrets.BESTCINE_CLIENT_SECRET }}
+          BESTCINE_SERVER_URL: ${{ secrets.BESTCINE_SERVER_URL }}
+          NUVIO_SUPABASE_URL: ${{ secrets.NUVIO_SUPABASE_URL }}
+          NUVIO_SUPABASE_ANON_KEY: ${{ secrets.NUVIO_SUPABASE_ANON_KEY }}
         run: |
           $keys = @(
             "TMDB_API_KEY","TRAKT_CLIENT_ID","TRAKT_CLIENT_SECRET","TRAKT_REDIRECT_URI",
             "SIMKL_CLIENT_ID","SIMKL_REDIRECT_URI","SIMKL_APP_NAME","MDBLIST_CLIENT_ID",
             "NUVIO_DISCORD_CLIENT_ID","PREMIUMIZE_CLIENT_ID","INTRODB_API_URL",
-            "IMDB_RATINGS_API_BASE_URL","IMDB_TAPFRAME_API_BASE_URL","BESTCINE_CLIENT_SECRET"
+            "IMDB_RATINGS_API_BASE_URL","IMDB_TAPFRAME_API_BASE_URL","BESTCINE_CLIENT_SECRET","BESTCINE_SERVER_URL",
+            "NUVIO_SUPABASE_URL","NUVIO_SUPABASE_ANON_KEY"
           )
           $lines = @()
           foreach ($k in $keys) {
@@ -174,6 +178,9 @@ jobs:
           IMDB_RATINGS_API_BASE_URL: ${{ secrets.IMDB_RATINGS_API_BASE_URL }}
           IMDB_TAPFRAME_API_BASE_URL: ${{ secrets.IMDB_TAPFRAME_API_BASE_URL }}
           BESTCINE_CLIENT_SECRET: ${{ secrets.BESTCINE_CLIENT_SECRET }}
+          BESTCINE_SERVER_URL: ${{ secrets.BESTCINE_SERVER_URL }}
+          NUVIO_SUPABASE_URL: ${{ secrets.NUVIO_SUPABASE_URL }}
+          NUVIO_SUPABASE_ANON_KEY: ${{ secrets.NUVIO_SUPABASE_ANON_KEY }}
         run: |
           set -euo pipefail
           umask 077
@@ -189,7 +196,8 @@ jobs:
             for k in TMDB_API_KEY TRAKT_CLIENT_ID TRAKT_CLIENT_SECRET TRAKT_REDIRECT_URI \
                      SIMKL_CLIENT_ID SIMKL_REDIRECT_URI SIMKL_APP_NAME MDBLIST_CLIENT_ID \
                      NUVIO_DISCORD_CLIENT_ID PREMIUMIZE_CLIENT_ID INTRODB_API_URL \
-                     IMDB_RATINGS_API_BASE_URL IMDB_TAPFRAME_API_BASE_URL BESTCINE_CLIENT_SECRET; do
+                     IMDB_RATINGS_API_BASE_URL IMDB_TAPFRAME_API_BASE_URL BESTCINE_CLIENT_SECRET BESTCINE_SERVER_URL \
+                     NUVIO_SUPABASE_URL NUVIO_SUPABASE_ANON_KEY; do
               v="${!k:-}"
               if [[ -n "$v" ]]; then echo "$k=$v"; fi
             done
@@ -281,6 +289,9 @@ jobs:
           IMDB_RATINGS_API_BASE_URL: ${{ secrets.IMDB_RATINGS_API_BASE_URL }}
           IMDB_TAPFRAME_API_BASE_URL: ${{ secrets.IMDB_TAPFRAME_API_BASE_URL }}
           BESTCINE_CLIENT_SECRET: ${{ secrets.BESTCINE_CLIENT_SECRET }}
+          BESTCINE_SERVER_URL: ${{ secrets.BESTCINE_SERVER_URL }}
+          NUVIO_SUPABASE_URL: ${{ secrets.NUVIO_SUPABASE_URL }}
+          NUVIO_SUPABASE_ANON_KEY: ${{ secrets.NUVIO_SUPABASE_ANON_KEY }}
         run: |
           set -euo pipefail
           trap 'rm -f local.properties' EXIT
@@ -288,7 +299,8 @@ jobs:
             for k in TMDB_API_KEY TRAKT_CLIENT_ID TRAKT_CLIENT_SECRET TRAKT_REDIRECT_URI \
                      SIMKL_CLIENT_ID SIMKL_REDIRECT_URI SIMKL_APP_NAME MDBLIST_CLIENT_ID \
                      NUVIO_DISCORD_CLIENT_ID PREMIUMIZE_CLIENT_ID INTRODB_API_URL \
-                     IMDB_RATINGS_API_BASE_URL IMDB_TAPFRAME_API_BASE_URL BESTCINE_CLIENT_SECRET; do
+                     IMDB_RATINGS_API_BASE_URL IMDB_TAPFRAME_API_BASE_URL BESTCINE_CLIENT_SECRET BESTCINE_SERVER_URL \
+                     NUVIO_SUPABASE_URL NUVIO_SUPABASE_ANON_KEY; do
               v="${!k:-}"
               if [[ -n "$v" ]]; then echo "$k=$v"; fi
             done
@@ -357,6 +369,9 @@ jobs:
           IMDB_RATINGS_API_BASE_URL: ${{ secrets.IMDB_RATINGS_API_BASE_URL }}
           IMDB_TAPFRAME_API_BASE_URL: ${{ secrets.IMDB_TAPFRAME_API_BASE_URL }}
           BESTCINE_CLIENT_SECRET: ${{ secrets.BESTCINE_CLIENT_SECRET }}
+          BESTCINE_SERVER_URL: ${{ secrets.BESTCINE_SERVER_URL }}
+          NUVIO_SUPABASE_URL: ${{ secrets.NUVIO_SUPABASE_URL }}
+          NUVIO_SUPABASE_ANON_KEY: ${{ secrets.NUVIO_SUPABASE_ANON_KEY }}
         run: |
           set -euo pipefail
           trap 'rm -f local.properties' EXIT
@@ -364,7 +379,8 @@ jobs:
             for k in TMDB_API_KEY TRAKT_CLIENT_ID TRAKT_CLIENT_SECRET TRAKT_REDIRECT_URI \
                      SIMKL_CLIENT_ID SIMKL_REDIRECT_URI SIMKL_APP_NAME MDBLIST_CLIENT_ID \
                      NUVIO_DISCORD_CLIENT_ID PREMIUMIZE_CLIENT_ID INTRODB_API_URL \
-                     IMDB_RATINGS_API_BASE_URL IMDB_TAPFRAME_API_BASE_URL BESTCINE_CLIENT_SECRET; do
+                     IMDB_RATINGS_API_BASE_URL IMDB_TAPFRAME_API_BASE_URL BESTCINE_CLIENT_SECRET BESTCINE_SERVER_URL \
+                     NUVIO_SUPABASE_URL NUVIO_SUPABASE_ANON_KEY; do
               v="${!k:-}"
               if [[ -n "$v" ]]; then echo "$k=$v"; fi
             done
@@ -450,6 +466,9 @@ jobs:
           IMDB_RATINGS_API_BASE_URL: ${{ secrets.IMDB_RATINGS_API_BASE_URL }}
           IMDB_TAPFRAME_API_BASE_URL: ${{ secrets.IMDB_TAPFRAME_API_BASE_URL }}
           BESTCINE_CLIENT_SECRET: ${{ secrets.BESTCINE_CLIENT_SECRET }}
+          BESTCINE_SERVER_URL: ${{ secrets.BESTCINE_SERVER_URL }}
+          NUVIO_SUPABASE_URL: ${{ secrets.NUVIO_SUPABASE_URL }}
+          NUVIO_SUPABASE_ANON_KEY: ${{ secrets.NUVIO_SUPABASE_ANON_KEY }}
         run: |
           set -euo pipefail
           xcodebuild -version
@@ -459,7 +478,8 @@ jobs:
             for k in TMDB_API_KEY TRAKT_CLIENT_ID TRAKT_CLIENT_SECRET TRAKT_REDIRECT_URI \
                      SIMKL_CLIENT_ID SIMKL_REDIRECT_URI SIMKL_APP_NAME MDBLIST_CLIENT_ID \
                      NUVIO_DISCORD_CLIENT_ID PREMIUMIZE_CLIENT_ID INTRODB_API_URL \
-                     IMDB_RATINGS_API_BASE_URL IMDB_TAPFRAME_API_BASE_URL BESTCINE_CLIENT_SECRET; do
+                     IMDB_RATINGS_API_BASE_URL IMDB_TAPFRAME_API_BASE_URL BESTCINE_CLIENT_SECRET BESTCINE_SERVER_URL \
+                     NUVIO_SUPABASE_URL NUVIO_SUPABASE_ANON_KEY; do
               v="${!k:-}"
               if [[ -n "$v" ]]; then echo "$k=$v"; fi
             done

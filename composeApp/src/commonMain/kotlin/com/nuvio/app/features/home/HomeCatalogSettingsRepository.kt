@@ -46,6 +46,7 @@ data class HomeCatalogSettingsUiState(
     val heroEnabled: Boolean = true,
     val showCatalogType: Boolean = true,
     val hideUnreleasedContent: Boolean = false,
+    val showBestCineDefaultCatalogs: Boolean = true,
     val items: List<HomeCatalogSettingsItem> = emptyList(),
     val streamingCatalogConfig: BestCineStreamingCatalogConfig = BestCineStreamingCatalogConfig(),
 ) {
@@ -56,6 +57,8 @@ data class HomeCatalogSettingsUiState(
             append(showCatalogType)
             append('|')
             append(hideUnreleasedContent)
+            append('|')
+            append(showBestCineDefaultCatalogs)
             append('|')
             append(streamingCatalogConfig.signature)
             append('|')
@@ -95,6 +98,7 @@ private data class StoredHomeCatalogSettingsPayload(
     val heroEnabled: Boolean = true,
     val showCatalogType: Boolean = true,
     val hideUnreleasedContent: Boolean = false,
+    val showBestCineDefaultCatalogs: Boolean = true,
     val items: List<StoredHomeCatalogPreference> = emptyList(),
     val releasesCatalogEnabled: Boolean = true,
     val momentCatalogEnabled: Boolean = true,
@@ -141,6 +145,7 @@ object HomeCatalogSettingsRepository {
     private var heroEnabled = true
     private var showCatalogType = true
     private var hideUnreleasedContent = false
+    private var showBestCineDefaultCatalogs = true
     private var releasesCatalogEnabled = true
     private var momentCatalogEnabled = true
     private var seasonalCatalogEnabled = true
@@ -157,6 +162,7 @@ object HomeCatalogSettingsRepository {
         heroEnabled = true
         showCatalogType = true
         hideUnreleasedContent = false
+        showBestCineDefaultCatalogs = true
         releasesCatalogEnabled = true
         momentCatalogEnabled = true
         seasonalCatalogEnabled = true
@@ -185,6 +191,7 @@ object HomeCatalogSettingsRepository {
         heroEnabled = true
         showCatalogType = true
         hideUnreleasedContent = false
+        showBestCineDefaultCatalogs = true
         releasesCatalogEnabled = true
         momentCatalogEnabled = true
         seasonalCatalogEnabled = true
@@ -301,6 +308,7 @@ object HomeCatalogSettingsRepository {
             locale = Locale.current.toLanguageTag(),
             serverRevision = ServerRepository.uiState.value.revision,
             streamingSignature = currentStreamingCatalogConfig().signature,
+            showBestCineDefaultCatalogs = showBestCineDefaultCatalogs,
         )
         if (lastCatalogSync == syncInput) return
         definitions = buildHomeCatalogDefinitions(addons)
@@ -396,7 +404,43 @@ object HomeCatalogSettingsRepository {
 
     fun setEnabled(key: String, enabled: Boolean) {
         updatePreference(key) { preference ->
-            preference.copy(enabled = enabled)
+            preference.copy(
+                enabled = enabled,
+                heroSourceEnabled = if (enabled) preference.heroSourceEnabled else false,
+            )
+        }
+        if (!enabled) {
+            promoteHeroSourcesIfNoneActive()
+        }
+    }
+
+    private fun promoteHeroSourcesIfNoneActive() {
+        val tvCatalogKeys = definitions
+            .filter { it.type.equals("tv", ignoreCase = true) || it.type.equals("channel", ignoreCase = true) }
+            .mapTo(mutableSetOf()) { it.key }
+        val activeCatalogKeys = definitions
+            .map { it.key }
+            .filterNot { it in tvCatalogKeys }
+            .sortedBy { preferences[it]?.order ?: Int.MAX_VALUE }
+        val currentHeroCount = activeCatalogKeys.count { key ->
+            val pref = preferences[key]
+            pref?.enabled != false && pref?.heroSourceEnabled == true
+        }
+        if (currentHeroCount > 0) return
+        val updated = preferences.toMutableMap()
+        var promoted = 0
+        for (catalogKey in activeCatalogKeys) {
+            if (promoted >= HERO_SOURCE_SELECTION_LIMIT) break
+            val pref = updated[catalogKey] ?: continue
+            if (!pref.enabled) continue
+            updated[catalogKey] = pref.copy(heroSourceEnabled = true)
+            promoted += 1
+        }
+        if (promoted > 0) {
+            preferences = updated.toMap()
+            publish()
+            persist()
+            HomeRepository.applyCurrentSettings()
         }
     }
 
@@ -404,6 +448,18 @@ object HomeCatalogSettingsRepository {
         updatePreference(key) { preference ->
             preference.copy(customTitle = title)
         }
+    }
+
+    fun showBestCineDefaultCatalogs(): Boolean {
+        ensureLoaded()
+        return showBestCineDefaultCatalogs
+    }
+
+    fun setShowBestCineDefaultCatalogs(enabled: Boolean) {
+        ensureLoaded()
+        if (showBestCineDefaultCatalogs == enabled) return
+        showBestCineDefaultCatalogs = enabled
+        applyStreamingCatalogConfigChange()
     }
 
     fun streamingCatalogConfig(): BestCineStreamingCatalogConfig {
@@ -529,6 +585,7 @@ object HomeCatalogSettingsRepository {
         heroEnabled = true
         showCatalogType = true
         hideUnreleasedContent = false
+        showBestCineDefaultCatalogs = true
         releasesCatalogEnabled = true
         momentCatalogEnabled = true
         seasonalCatalogEnabled = true
@@ -593,6 +650,7 @@ object HomeCatalogSettingsRepository {
             heroEnabled = parsedPayload.heroEnabled
             showCatalogType = parsedPayload.showCatalogType
             hideUnreleasedContent = parsedPayload.hideUnreleasedContent
+            showBestCineDefaultCatalogs = parsedPayload.showBestCineDefaultCatalogs
             releasesCatalogEnabled = parsedPayload.releasesCatalogEnabled
             momentCatalogEnabled = parsedPayload.momentCatalogEnabled
             seasonalCatalogEnabled = parsedPayload.seasonalCatalogEnabled
@@ -668,6 +726,19 @@ object HomeCatalogSettingsRepository {
                 order = stored?.order ?: nextOrder++,
             )
         }
+        // Se os catálogos que alimentavam o Hero foram desativados/ocultados (ex.: ao desligar
+        // os catálogos padrão do BestCine), promove automaticamente até 2 catálogos ativos restantes
+        // para que o banner Hero nunca fique vazio.
+        if (enabledHeroSourceCount == 0) {
+            orderedEntries.forEach { entry ->
+                if (enabledHeroSourceCount >= HERO_SOURCE_SELECTION_LIMIT) return@forEach
+                if (entry.isCollection || entry.key in tvCatalogKeys) return@forEach
+                val pref = normalized[entry.key] ?: return@forEach
+                if (!pref.enabled) return@forEach
+                normalized[entry.key] = pref.copy(heroSourceEnabled = true)
+                enabledHeroSourceCount += 1
+            }
+        }
         preferences = normalized.toMap()
     }
 
@@ -722,6 +793,7 @@ object HomeCatalogSettingsRepository {
             heroEnabled = heroEnabled,
             showCatalogType = showCatalogType,
             hideUnreleasedContent = hideUnreleasedContent,
+            showBestCineDefaultCatalogs = showBestCineDefaultCatalogs,
             items = items,
             streamingCatalogConfig = currentStreamingCatalogConfig(),
         )
@@ -734,6 +806,7 @@ object HomeCatalogSettingsRepository {
                 heroEnabled = heroEnabled,
                 showCatalogType = showCatalogType,
                 hideUnreleasedContent = hideUnreleasedContent,
+                showBestCineDefaultCatalogs = showBestCineDefaultCatalogs,
                 items = preferences.values.sortedBy { it.order },
                 releasesCatalogEnabled = releasesCatalogEnabled,
                 momentCatalogEnabled = momentCatalogEnabled,
@@ -981,4 +1054,5 @@ private data class CatalogSyncInput(
     val locale: String,
     val serverRevision: Int,
     val streamingSignature: String,
+    val showBestCineDefaultCatalogs: Boolean,
 )

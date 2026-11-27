@@ -1,8 +1,11 @@
 package com.nuvio.app.core.auth
 
 import co.touchlab.kermit.Logger
+import com.nuvio.app.bestcine.BestCineAccountRepository
+import com.nuvio.app.core.network.ServerConfigurationRepository
 import com.nuvio.app.core.network.SupabaseProvider
 import com.nuvio.app.core.storage.LocalAccountDataCleaner
+import com.nuvio.app.core.sync.SyncManager
 import io.github.jan.supabase.auth.auth
 import io.github.jan.supabase.auth.exception.AuthRestException
 import io.github.jan.supabase.auth.providers.builtin.Email
@@ -60,15 +63,18 @@ object AuthRepository {
             if (AuthStorage.loadFlag(KEY_SIGNED_OUT_NOTICE)) {
                 _error.value = getString(Res.string.auth_notice_signed_out)
             }
+            if (!isNuvioBackendConfigured()) return@launch
             SupabaseProvider.client.auth.sessionStatus.collect { status ->
-                if (AuthStorage.loadAnonymousUserId() != null) return@collect
                 when (status) {
                     is SessionStatus.Authenticated -> {
                         val user = status.session.user
                         val userId = user?.id.orEmpty()
+                        if (userId.isBlank()) return@collect
                         if (!validateRemoteSession(userId)) return@collect
+                        AuthStorage.clearAnonymousUserId()
                         AuthStorage.saveFlag(KEY_HAD_ACCOUNT_SESSION, true)
                         AuthStorage.saveFlag(KEY_SIGNED_OUT_NOTICE, false)
+                        _error.value = null
                         _state.value = AuthState.Authenticated(
                             userId = userId,
                             email = user?.email,
@@ -76,6 +82,9 @@ object AuthRepository {
                         )
                     }
                     is SessionStatus.NotAuthenticated -> {
+                        if (AuthStorage.loadAnonymousUserId() != null && !AuthStorage.loadFlag(KEY_HAD_ACCOUNT_SESSION)) {
+                            return@collect
+                        }
                         if (AuthStorage.loadFlag(KEY_HAD_ACCOUNT_SESSION)) {
                             resetAfterLostSession()
                         } else {
@@ -83,7 +92,7 @@ object AuthRepository {
                         }
                     }
                     is SessionStatus.Initializing -> {
-                        if (AuthStorage.loadAnonymousUserId() == null) {
+                        if (AuthStorage.loadAnonymousUserId() == null && !BestCineAccountRepository.state.value.isConnected) {
                             _state.value = AuthState.Loading
                         }
                     }
@@ -124,6 +133,116 @@ object AuthRepository {
             email = null,
             isAnonymous = true,
         )
+    }
+
+    fun isNuvioBackendConfigured(): Boolean {
+        val config = ServerConfigurationRepository.active.value
+        return config.backendUrl.isNotBlank() && config.publishableKey.isNotBlank()
+    }
+
+    fun hasStoredNuvioTrackingSession(): Boolean =
+        AuthStorage.loadFlag(KEY_HAD_ACCOUNT_SESSION) ||
+            !AuthStorage.loadSupabaseSessionJson().isNullOrBlank()
+
+    fun prepareForNuvioTrackingSignIn() {
+        _error.value = null
+        AuthStorage.clearAnonymousUserId()
+    }
+
+    fun restoreAnonymousIfNotAuthenticated() {
+        val current = _state.value
+        if (current !is AuthState.Authenticated || current.isAnonymous) {
+            signInAnonymously()
+        }
+    }
+
+    suspend fun connectNuvioTrackingWithEmail(
+        email: String,
+        password: String,
+        isSignUp: Boolean,
+    ): Result<String?> {
+        if (!isNuvioBackendConfigured()) {
+            val msg = "API da Conta Nuvio não configurada neste build."
+            _error.value = msg
+            return Result.failure(IllegalStateException(msg))
+        }
+        _error.value = null
+        val previousAnonId = AuthStorage.loadAnonymousUserId()
+        AuthStorage.clearAnonymousUserId()
+        return try {
+            if (isSignUp) {
+                SupabaseProvider.client.auth.signUpWith(Email) {
+                    this.email = email
+                    this.password = password
+                }
+            } else {
+                SupabaseProvider.client.auth.signInWith(Email) {
+                    this.email = email
+                    this.password = password
+                }
+            }
+            val session = SupabaseProvider.client.auth.currentSessionOrNull()
+            val user = session?.user
+            if (session != null && user != null && user.id.isNotBlank()) {
+                AuthStorage.saveFlag(KEY_HAD_ACCOUNT_SESSION, true)
+                AuthStorage.saveFlag(KEY_SIGNED_OUT_NOTICE, false)
+                validatedRemoteUserId = user.id
+                _state.value = AuthState.Authenticated(
+                    userId = user.id,
+                    email = user.email ?: email,
+                    isAnonymous = false,
+                )
+                Result.success(null)
+            } else {
+                // Cadastro criado, mas aguardando confirmação de e-mail
+                if (previousAnonId != null) {
+                    AuthStorage.saveAnonymousUserId(previousAnonId)
+                    signInAnonymously()
+                }
+                Result.success("Conta criada! Confirme o link enviado ao seu e-mail e entre novamente.")
+            }
+        } catch (e: CancellationException) {
+            if (previousAnonId != null && SupabaseProvider.client.auth.currentSessionOrNull() == null) {
+                AuthStorage.saveAnonymousUserId(previousAnonId)
+            }
+            throw e
+        } catch (e: Throwable) {
+            log.e(e) { "Nuvio tracking email auth failed (signUp=$isSignUp)" }
+            if (previousAnonId != null) {
+                AuthStorage.saveAnonymousUserId(previousAnonId)
+                signInAnonymously()
+            }
+            val msg = e.safeAuthErrorDescription()
+                ?: if (isSignUp) getString(Res.string.auth_sign_up_failed)
+                else getString(Res.string.auth_sign_in_failed)
+            _error.value = msg
+            Result.failure(IllegalStateException(msg, e))
+        }
+    }
+
+    suspend fun disconnectNuvioTrackingAccount(): Result<Unit> {
+        _error.value = null
+        SyncManager.cancelAccountSync()
+        AuthStorage.saveFlag(KEY_HAD_ACCOUNT_SESSION, false)
+        AuthStorage.saveFlag(KEY_SIGNED_OUT_NOTICE, false)
+        validatedRemoteUserId = null
+        val remoteSignOut = runCatching {
+            if (isNuvioBackendConfigured()) {
+                SupabaseProvider.client.auth.signOut()
+            }
+        }
+        val fallbackClear = if (remoteSignOut.isFailure && isNuvioBackendConfigured()) {
+            runCatching { SupabaseProvider.client.auth.clearSession() }
+        } else {
+            Result.success(Unit)
+        }
+        AuthStorage.clearSupabaseSessionJson()
+        // Mantém a conta BestCine e os dados locais intactos
+        signInAnonymously()
+        val cancellation = remoteSignOut.exceptionOrNull() as? CancellationException
+            ?: fallbackClear.exceptionOrNull() as? CancellationException
+        if (cancellation != null) throw cancellation
+        return Result.success(Unit)
     }
 
     suspend fun signUpWithEmail(email: String, password: String): Result<Unit> = runCatching {
@@ -248,10 +367,18 @@ object AuthRepository {
 
     private suspend fun resetAfterLostSession() {
         val notice = runCatching { getString(Res.string.auth_notice_signed_out) }.getOrNull()
-        AuthStorage.clearAnonymousUserId()
         validatedRemoteUserId = null
-        val localCleanup = runCatching { LocalAccountDataCleaner.wipe() }
         AuthStorage.saveFlag(KEY_HAD_ACCOUNT_SESSION, false)
+        if (BestCineAccountRepository.state.value.isConnected) {
+            // BestCine ativo: desconecta apenas o rastreamento Nuvio sem apagar dados locais nem a conta BestCine
+            SyncManager.cancelAccountSync()
+            AuthStorage.saveFlag(KEY_SIGNED_OUT_NOTICE, false)
+            _error.value = notice
+            signInAnonymously()
+            return
+        }
+        AuthStorage.clearAnonymousUserId()
+        val localCleanup = runCatching { LocalAccountDataCleaner.wipe() }
         AuthStorage.saveFlag(KEY_SIGNED_OUT_NOTICE, true)
         _error.value = notice
         _state.value = AuthState.Unauthenticated

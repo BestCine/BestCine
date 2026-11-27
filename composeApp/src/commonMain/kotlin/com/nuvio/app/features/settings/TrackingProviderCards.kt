@@ -188,6 +188,9 @@ internal fun TrackingProviderCards(
         modifier = Modifier.fillMaxWidth(),
         verticalArrangement = Arrangement.spacedBy(if (isTablet) 16.dp else 12.dp),
     ) {
+        NuvioAccountProviderCard(
+            modifier = Modifier.fillMaxWidth(),
+        )
         TraktProviderCard(
             uiState = traktUiState,
             modifier = Modifier.fillMaxWidth(),
@@ -658,6 +661,7 @@ private fun TrackingBrandPrimaryButton(
     onClick: () -> Unit,
     showSyncIcon: Boolean = false,
 ) {
+    val buttonTextColor = if (enabled) Color(0xFF171717) else Color.White.copy(alpha = 0.7f)
     Button(
         onClick = onClick,
         enabled = enabled,
@@ -673,19 +677,24 @@ private fun TrackingBrandPrimaryButton(
     ) {
         when {
             loading -> NuvioLoadingIndicator(
-                color = Color(0xFF171717),
+                color = buttonTextColor,
                 modifier = Modifier.size(18.dp),
             )
             showSyncIcon -> Icon(
                 imageVector = Icons.Rounded.Sync,
                 contentDescription = null,
+                tint = buttonTextColor,
                 modifier = Modifier.size(18.dp),
             )
         }
         if (loading || showSyncIcon) {
             Spacer(modifier = Modifier.width(8.dp))
         }
-        Text(label)
+        Text(
+            text = label,
+            color = buttonTextColor,
+            fontWeight = FontWeight.SemiBold,
+        )
     }
 }
 

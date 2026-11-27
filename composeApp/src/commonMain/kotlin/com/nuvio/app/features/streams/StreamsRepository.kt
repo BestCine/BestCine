@@ -184,6 +184,7 @@ object StreamsRepository {
         }
 
         val streamAddons = installedAddons
+            .filter { it.isAllowedStreamProvider() }
             .mapNotNull { addon ->
                 val manifest = addon.manifest ?: return@mapNotNull null
                 if (!manifest.supportsStream(type, videoId)) return@mapNotNull null

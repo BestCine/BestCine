@@ -883,7 +883,7 @@ object BestCineAccountRepository {
 
     private fun ensureAppEntered() {
         val currentAuth = AuthRepository.state.value
-        if (currentAuth !is AuthState.Authenticated) {
+        if (currentAuth !is AuthState.Authenticated && !AuthRepository.hasStoredNuvioTrackingSession()) {
             AuthRepository.signInAnonymously()
         }
     }

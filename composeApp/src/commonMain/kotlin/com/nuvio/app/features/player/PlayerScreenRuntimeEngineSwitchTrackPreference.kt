@@ -171,6 +171,7 @@ private fun PlayerScreenRuntime.applyCarriedOverSubtitleSelection(
             controller.selectSubtitleTrack(-1)
             selectedSubtitleIndex = -1
             selectedAddonSubtitleId = null
+            activeAddonSubtitle = null
             useCustomSubtitles = false
             preferredSubtitleSelectionApplied = true
             isUserExplicitSubtitleSelection = true
@@ -181,6 +182,7 @@ private fun PlayerScreenRuntime.applyCarriedOverSubtitleSelection(
             when {
                 subtitle != null -> {
                     selectedAddonSubtitleId = subtitle.selectionKey
+                    activeAddonSubtitle = subtitle
                     selectedSubtitleIndex = -1
                     useCustomSubtitles = true
                     preferredSubtitleSelectionApplied = true
@@ -203,6 +205,7 @@ private fun PlayerScreenRuntime.applyCarriedOverSubtitleSelection(
                     }
                     selectedSubtitleIndex = track.index
                     selectedAddonSubtitleId = null
+                    activeAddonSubtitle = null
                     useCustomSubtitles = false
                     preferredSubtitleSelectionApplied = true
                     isUserExplicitSubtitleSelection = true

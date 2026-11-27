@@ -1,9 +1,12 @@
 package com.nuvio.app.core.network
 
+import com.nuvio.app.core.auth.AuthStorage
 import com.nuvio.app.core.build.AppVersionConfig
 import io.github.jan.supabase.SupabaseClient
 import io.github.jan.supabase.annotations.SupabaseInternal
 import io.github.jan.supabase.auth.Auth
+import io.github.jan.supabase.auth.SessionManager
+import io.github.jan.supabase.auth.user.UserSession
 import io.github.jan.supabase.createSupabaseClient
 import io.github.jan.supabase.functions.Functions
 import io.github.jan.supabase.postgrest.Postgrest
@@ -110,7 +113,9 @@ object SupabaseProvider {
                     contentConverter = KotlinxWebsocketSerializationConverter(supabaseJson)
                 }
             }
-            install(Auth)
+            install(Auth) {
+                sessionManager = PersistentAuthSessionManager
+            }
             install(Postgrest)
             install(Functions)
             install(Storage)
@@ -133,5 +138,30 @@ object SupabaseProvider {
             }
         }
         previous?.close()
+    }
+}
+
+private object PersistentAuthSessionManager : SessionManager {
+    private val json = kotlinx.serialization.json.Json {
+        ignoreUnknownKeys = true
+        encodeDefaults = true
+    }
+
+    override suspend fun saveSession(session: UserSession) {
+        runCatching {
+            AuthStorage.saveSupabaseSessionJson(json.encodeToString(UserSession.serializer(), session))
+        }
+    }
+
+    override suspend fun loadSession(): UserSession? =
+        runCatching {
+            val raw = AuthStorage.loadSupabaseSessionJson()?.takeIf(String::isNotBlank) ?: return null
+            json.decodeFromString(UserSession.serializer(), raw)
+        }.getOrNull()
+
+    override suspend fun deleteSession() {
+        runCatching {
+            AuthStorage.clearSupabaseSessionJson()
+        }
     }
 }

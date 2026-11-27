@@ -153,6 +153,7 @@ internal fun PlayerScreenRuntime.BindPlayerRuntimeEffects() {
         hasScannedTextTracksOnce = false
         selectedSubtitleIndex = -1
         selectedAddonSubtitleId = null
+        activeAddonSubtitle = null
         useCustomSubtitles = false
         showSourcesPanel = false
         showEpisodesPanel = false

@@ -14,8 +14,10 @@ import io.ktor.client.HttpClient
 import io.ktor.client.engine.darwin.Darwin
 import io.ktor.client.plugins.HttpTimeout
 import io.ktor.client.request.get
+import io.ktor.client.request.head
 import io.ktor.client.request.header
 import io.ktor.client.request.prepareGet
+import io.ktor.client.statement.HttpResponse
 import io.ktor.client.statement.bodyAsBytes
 import io.ktor.client.statement.bodyAsChannel
 import io.ktor.client.statement.bodyAsText
@@ -48,10 +50,14 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import platform.Foundation.NSDate
+import platform.Foundation.NSURLRequestReloadIgnoringLocalCacheData
 import platform.Foundation.timeIntervalSince1970
 import platform.posix.AF_INET
+import platform.posix.EAGAIN
+import platform.posix.EINTR
 import platform.posix.F_GETFL
 import platform.posix.F_SETFL
+import platform.posix.IPPROTO_TCP
 import platform.posix.O_NONBLOCK
 import platform.posix.POLLERR
 import platform.posix.POLLHUP
@@ -61,12 +67,15 @@ import platform.posix.SOCK_DGRAM
 import platform.posix.SOCK_STREAM
 import platform.posix.SOL_SOCKET
 import platform.posix.SO_ERROR
+import platform.posix.SO_KEEPALIVE
 import platform.posix.SO_NOSIGPIPE
 import platform.posix.SO_REUSEADDR
+import platform.posix.TCP_NODELAY
 import platform.posix.accept
 import platform.posix.bind
 import platform.posix.close
 import platform.posix.connect
+import platform.posix.errno
 import platform.posix.fcntl
 import platform.posix.getsockname
 import platform.posix.getsockopt
@@ -477,16 +486,56 @@ private class IosDlnaHttpProxy private constructor(
     private val isLiveStream: Boolean,
 ) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
-    // Cliente dedicado de streaming DLNA no iOS:
-    // - followRedirects = true (streams VOD/IPTV quase sempre retornam 301/302 da CDN/proxy);
-    // - sem requestTimeoutMillis (permite filmes longos e TV ao vivo sem corte em 30s).
-    private val httpClient by lazy {
+    // Clientes dedicados de streaming DLNA no iOS com followRedirects = false:
+    // No Ktor Darwin (NSURLSession), redirects nativos NÃO atualizam resp.call.request.url
+    // (quebrando 100% dos caminhos relativos em playlists HLS de TV Ao Vivo/Pluto TV e VOD HLS)
+    // e removem headers customizados entre domínios. Seguimos redirects manualmente (até 10 saltos)
+    // e desativamos NSURLCache para nunca servir playlists .m3u8 antigas em canais Ao Vivo.
+    private val streamHttpClient by lazy {
         HttpClient(Darwin) {
-            followRedirects = true
+            followRedirects = false
             expectSuccess = false
+            engine {
+                configureRequest {
+                    setCachePolicy(NSURLRequestReloadIgnoringLocalCacheData)
+                    setAllowsCellularAccess(true)
+                }
+                configureSession {
+                    requestCachePolicy = NSURLRequestReloadIgnoringLocalCacheData
+                    URLCache = null
+                    timeoutIntervalForRequest = if (isLiveStream) 25.0 else 60.0
+                    timeoutIntervalForResource = 60.0 * 60.0 * 12.0
+                    allowsCellularAccess = true
+                }
+            }
             install(HttpTimeout) {
+                requestTimeoutMillis = Long.MAX_VALUE
                 connectTimeoutMillis = 15_000L
-                socketTimeoutMillis = 45_000L
+                socketTimeoutMillis = if (isLiveStream) 25_000L else 60_000L
+            }
+        }
+    }
+    private val metaHttpClient by lazy {
+        HttpClient(Darwin) {
+            followRedirects = false
+            expectSuccess = false
+            engine {
+                configureRequest {
+                    setCachePolicy(NSURLRequestReloadIgnoringLocalCacheData)
+                    setAllowsCellularAccess(true)
+                }
+                configureSession {
+                    requestCachePolicy = NSURLRequestReloadIgnoringLocalCacheData
+                    URLCache = null
+                    timeoutIntervalForRequest = 15.0
+                    timeoutIntervalForResource = 30.0
+                    allowsCellularAccess = true
+                }
+            }
+            install(HttpTimeout) {
+                requestTimeoutMillis = 20_000L
+                connectTimeoutMillis = 12_000L
+                socketTimeoutMillis = 15_000L
             }
         }
     }
@@ -515,8 +564,8 @@ private class IosDlnaHttpProxy private constructor(
                         if (ready <= 0) continue
                         val clientFd = accept(serverFd, null, null)
                         if (clientFd < 0) continue
-                        // Evita sinal fatal SIGPIPE no iOS/Darwin quando a TV fecha a conexão TCP
-                        disableSigPipe(clientFd)
+                        // Evita SIGPIPE fatal, desativa Nagle (TCP_NODELAY) e ativa keepalive na TV
+                        configureClientSocket(clientFd)
                         scope.launch {
                             runCatching { handleClient(clientFd) }
                         }
@@ -534,7 +583,8 @@ private class IosDlnaHttpProxy private constructor(
         if (serverFd >= 0) {
             close(serverFd)
         }
-        runCatching { httpClient.close() }
+        runCatching { streamHttpClient.close() }
+        runCatching { metaHttpClient.close() }
     }
 
     private suspend fun handleClient(clientFd: Int) {
@@ -598,30 +648,77 @@ private class IosDlnaHttpProxy private constructor(
     private suspend fun handleVodHead(clientFd: Int, dlnaFeatures: String) {
         var safeMime = defaultContentType
         var totalLength: Long? = null
+        var detectedHls = false
+        var probedOk = false
+
         runCatching {
-            httpClient.prepareGet(defaultUrl) {
-                applyUpstreamHeaders(rangeHeader = "bytes=0-0")
-            }.execute { resp ->
+            executeStreamWithRedirects(
+                client = metaHttpClient,
+                initialUrl = defaultUrl,
+                rangeHeader = "bytes=0-0",
+                forceIdentityEncoding = true,
+            ) { resp, finalUrl ->
                 val code = resp.status.value
-                totalLength = parseTotalSizeFromRange(resp.headers["Content-Range"])
-                    ?: resp.contentLength()?.takeIf { it > 0L && code == 200 }
-                safeMime = normalizeVideoMime(resp.headers["Content-Type"], defaultContentType)
-                lastDiagnostic = "HEAD probe -> origem HTTP $code ($safeMime)"
+                val rawMime = resp.headers["Content-Type"]
+                if (rawMime.orEmpty().contains("mpegurl", ignoreCase = true) ||
+                    finalUrl.substringBefore('?').lowercase().endsWith(".m3u8")
+                ) {
+                    detectedHls = true
+                    safeMime = "video/mp2t"
+                    probedOk = true
+                    lastDiagnostic = "HEAD probe -> HLS ($finalUrl)"
+                    return@executeStreamWithRedirects
+                }
+                if (code in 200..299) {
+                    totalLength = parseTotalSizeFromRange(resp.headers["Content-Range"])
+                        ?: resp.contentLength()?.takeIf { it > 0L && code == 200 }
+                    safeMime = normalizeVideoMime(rawMime, defaultContentType)
+                    probedOk = true
+                    lastDiagnostic = "HEAD probe -> origem HTTP $code ($safeMime)"
+                } else {
+                    lastDiagnostic = "HEAD probe range -> HTTP $code"
+                }
             }
         }.onFailure { ex ->
             lastDiagnostic = "HEAD falha na origem: ${ex.message}"
         }
 
+        // Fallback: algumas CDNs recusam Range: bytes=0-0 (416/405/403); tenta HEAD direto
+        if (!probedOk && running) {
+            runCatching {
+                val headRes = executeMetaHeadWithRedirects(defaultUrl)
+                if (headRes != null) {
+                    val (resp, finalUrl) = headRes
+                    val rawMime = resp.headers["Content-Type"]
+                    if (rawMime.orEmpty().contains("mpegurl", ignoreCase = true) ||
+                        finalUrl.substringBefore('?').lowercase().endsWith(".m3u8")
+                    ) {
+                        detectedHls = true
+                        safeMime = "video/mp2t"
+                    } else if (resp.status.value in 200..299) {
+                        totalLength = resp.contentLength()?.takeIf { it > 0L }
+                        safeMime = normalizeVideoMime(rawMime, defaultContentType)
+                    }
+                    lastDiagnostic = "HEAD fallback -> HTTP ${resp.status.value} ($safeMime)"
+                }
+            }
+        }
+
+        val effectiveFeatures = if (detectedHls) {
+            "DLNA.ORG_OP=00;DLNA.ORG_CI=0;DLNA.ORG_FLAGS=01700000000000000000000000000000"
+        } else {
+            dlnaFeatures
+        }
         val headerBlock = buildString {
             append("HTTP/1.1 200 OK\r\n")
             append("Content-Type: $safeMime\r\n")
-            if (totalLength != null && totalLength!! > 0L) {
+            if (!detectedHls && totalLength != null && totalLength!! > 0L) {
                 append("Content-Length: $totalLength\r\n")
             }
-            append("Accept-Ranges: bytes\r\n")
+            append(if (detectedHls) "Accept-Ranges: none\r\n" else "Accept-Ranges: bytes\r\n")
             append("Access-Control-Allow-Origin: *\r\n")
             append("transferMode.dlna.org: Streaming\r\n")
-            append("contentFeatures.dlna.org: $dlnaFeatures\r\n")
+            append("contentFeatures.dlna.org: $effectiveFeatures\r\n")
             append("Connection: close\r\n\r\n")
         }
         writeAll(clientFd, headerBlock.encodeToByteArray())
@@ -635,102 +732,136 @@ private class IosDlnaHttpProxy private constructor(
         var bytesSent = 0L
         var clientDisconnected = false
         var handledHls = false
+        var headersSentToClient = false
+        var lastErrorStatus = 502
 
-        runCatching {
-            httpClient.prepareGet(defaultUrl) {
-                applyUpstreamHeaders(rangeHeader = rangeHeader)
-            }.execute { resp ->
-                val statusCode = resp.status.value
-                if (statusCode !in 200..299) {
-                    lastDiagnostic = "GET origem retornou HTTP $statusCode"
-                    writeAll(clientFd, "HTTP/1.1 $statusCode Error\r\nConnection: close\r\n\r\n".encodeToByteArray())
-                    clientDisconnected = true
-                    return@execute
-                }
+        // Até 3 tentativas na conexão inicial de VOD (alinhado ao Android/Desktop),
+        // evitando falhas aleatórias quando a CDN oscila ou redireciona.
+        var initialAttempt = 0
+        while (running && initialAttempt < 3 && !headersSentToClient && !handledHls && !clientDisconnected) {
+            initialAttempt += 1
+            var retryableFailure = false
 
-                val rawMime = resp.headers["Content-Type"]
-                val finalUrl = resp.call.request.url.toString()
-                resumeUrl = finalUrl
-                val channel = resp.bodyAsChannel()
-                val probeBuf = ByteArray(4096)
-                val probeRead = channel.readAvailable(probeBuf, 0, probeBuf.size).coerceAtLeast(0)
-                val probeText = if (probeRead > 0) probeBuf.decodeToString(0, probeRead).trimStart() else ""
-                val isHls = probeText.startsWith("#EXTM3U") ||
-                    rawMime.orEmpty().contains("mpegurl", ignoreCase = true) ||
-                    finalUrl.substringBefore('?').lowercase().endsWith(".m3u8")
-
-                if (isHls) {
-                    handledHls = true
-                    lastDiagnostic = "GET VOD HLS -> video/mp2t"
-                    val rest = readRemainingText(probeBuf, probeRead, channel)
-                    streamHlsAsMpegTs(
-                        initialText = rest,
-                        initialUrl = finalUrl,
-                        clientFd = clientFd,
-                        dlnaFeatures = "DLNA.ORG_OP=00;DLNA.ORG_CI=0;DLNA.ORG_FLAGS=01700000000000000000000000000000",
-                        normalizer = BestCineMpegTsTools.MpegTsNormalizer(),
-                        alreadySentHeaders = false,
-                    )
-                    return@execute
-                }
-
-                val safeMime = normalizeVideoMime(rawMime, defaultContentType)
-                val contentLength = resp.contentLength() ?: -1L
-                val contentRange = resp.headers["Content-Range"]
-                val parsedRange = parseContentRangeBounds(contentRange)
-                if (parsedRange != null) {
-                    startOffset = parsedRange.first
-                    endOffset = parsedRange.second
-                    expectedLength = (endOffset - startOffset + 1L).coerceAtLeast(0L)
-                } else {
-                    val reqBounds = parseRequestRangeBounds(rangeHeader)
-                    startOffset = reqBounds?.first ?: 0L
-                    endOffset = reqBounds?.second ?: if (contentLength > 0L) startOffset + contentLength - 1L else -1L
-                    expectedLength = contentLength
-                }
-
-                val statusMsg = if (statusCode == 206) "Partial Content" else "OK"
-                lastDiagnostic = "GET -> HTTP $statusCode ($safeMime)"
-
-                val headerBlock = buildString {
-                    append("HTTP/1.1 $statusCode $statusMsg\r\n")
-                    append("Content-Type: $safeMime\r\n")
-                    if (contentLength >= 0L) append("Content-Length: $contentLength\r\n")
-                    if (!contentRange.isNullOrBlank()) append("Content-Range: $contentRange\r\n")
-                    append("Accept-Ranges: bytes\r\n")
-                    append("Access-Control-Allow-Origin: *\r\n")
-                    append("transferMode.dlna.org: Streaming\r\n")
-                    append("contentFeatures.dlna.org: $dlnaFeatures\r\n")
-                    append("Connection: close\r\n\r\n")
-                }
-                if (!writeAll(clientFd, headerBlock.encodeToByteArray())) {
-                    clientDisconnected = true
-                    return@execute
-                }
-                if (probeRead > 0) {
-                    if (!writeAll(clientFd, probeBuf, probeRead)) {
+            runCatching {
+                executeStreamWithRedirects(
+                    client = streamHttpClient,
+                    initialUrl = defaultUrl,
+                    rangeHeader = rangeHeader,
+                    forceIdentityEncoding = true,
+                ) { resp, finalUrl ->
+                    val statusCode = resp.status.value
+                    if (statusCode !in 200..299) {
+                        lastErrorStatus = statusCode
+                        lastDiagnostic = "GET origem retornou HTTP $statusCode (tentativa $initialAttempt)"
+                        if (statusCode >= 500 || statusCode == 429 || statusCode == 408) {
+                            retryableFailure = true
+                            return@executeStreamWithRedirects
+                        }
+                        writeAll(clientFd, "HTTP/1.1 $statusCode Error\r\nConnection: close\r\n\r\n".encodeToByteArray())
                         clientDisconnected = true
-                        return@execute
+                        return@executeStreamWithRedirects
                     }
-                    bytesSent += probeRead
-                }
 
-                val buffer = ByteArray(32 * 1024)
-                while (running) {
-                    val read = channel.readAvailable(buffer, 0, buffer.size)
-                    if (read <= 0) break
-                    if (!writeAll(clientFd, buffer, read)) {
-                        clientDisconnected = true
-                        break
+                    val rawMime = resp.headers["Content-Type"]
+                    resumeUrl = finalUrl
+                    val channel = resp.bodyAsChannel()
+                    val probeBuf = ByteArray(4096)
+                    val probeRead = channel.readAvailable(probeBuf, 0, probeBuf.size).coerceAtLeast(0)
+                    val maybeTextHls = rawMime.orEmpty().contains("mpegurl", ignoreCase = true) ||
+                        finalUrl.substringBefore('?').lowercase().endsWith(".m3u8") ||
+                        looksLikeM3u8Prefix(probeBuf, probeRead)
+                    val probeText = if (maybeTextHls && probeRead > 0) {
+                        probeBuf.decodeToString(0, probeRead).trimStart('\uFEFF', ' ', '\t', '\r', '\n')
+                    } else {
+                        ""
                     }
-                    bytesSent += read
+                    val isHls = probeText.startsWith("#EXTM3U") ||
+                        rawMime.orEmpty().contains("mpegurl", ignoreCase = true) ||
+                        finalUrl.substringBefore('?').lowercase().endsWith(".m3u8")
+
+                    if (isHls) {
+                        handledHls = true
+                        lastDiagnostic = "GET VOD HLS -> video/mp2t"
+                        val rest = readRemainingText(probeBuf, probeRead, channel)
+                        streamHlsAsMpegTs(
+                            initialText = rest,
+                            initialUrl = finalUrl,
+                            clientFd = clientFd,
+                            dlnaFeatures = "DLNA.ORG_OP=00;DLNA.ORG_CI=0;DLNA.ORG_FLAGS=01700000000000000000000000000000",
+                            normalizer = BestCineMpegTsTools.MpegTsNormalizer(),
+                            alreadySentHeaders = false,
+                        )
+                        return@executeStreamWithRedirects
+                    }
+
+                    val safeMime = normalizeVideoMime(rawMime, defaultContentType)
+                    val contentLength = resp.contentLength() ?: -1L
+                    val contentRange = resp.headers["Content-Range"]
+                    val parsedRange = parseContentRangeBounds(contentRange)
+                    if (parsedRange != null) {
+                        startOffset = parsedRange.first
+                        endOffset = parsedRange.second
+                        expectedLength = (endOffset - startOffset + 1L).coerceAtLeast(0L)
+                    } else {
+                        val reqBounds = parseRequestRangeBounds(rangeHeader)
+                        startOffset = reqBounds?.first ?: 0L
+                        endOffset = reqBounds?.second ?: if (contentLength > 0L) startOffset + contentLength - 1L else -1L
+                        expectedLength = contentLength
+                    }
+
+                    val statusMsg = if (statusCode == 206) "Partial Content" else "OK"
+                    lastDiagnostic = "GET -> HTTP $statusCode ($safeMime)"
+
+                    val headerBlock = buildString {
+                        append("HTTP/1.1 $statusCode $statusMsg\r\n")
+                        append("Content-Type: $safeMime\r\n")
+                        if (contentLength >= 0L) append("Content-Length: $contentLength\r\n")
+                        if (!contentRange.isNullOrBlank()) append("Content-Range: $contentRange\r\n")
+                        append("Accept-Ranges: bytes\r\n")
+                        append("Access-Control-Allow-Origin: *\r\n")
+                        append("transferMode.dlna.org: Streaming\r\n")
+                        append("contentFeatures.dlna.org: $dlnaFeatures\r\n")
+                        append("Connection: close\r\n\r\n")
+                    }
+                    if (!writeAll(clientFd, headerBlock.encodeToByteArray())) {
+                        clientDisconnected = true
+                        return@executeStreamWithRedirects
+                    }
+                    headersSentToClient = true
+                    if (probeRead > 0) {
+                        if (!writeAll(clientFd, probeBuf, probeRead)) {
+                            clientDisconnected = true
+                            return@executeStreamWithRedirects
+                        }
+                        bytesSent += probeRead
+                    }
+
+                    val buffer = ByteArray(32 * 1024)
+                    while (running) {
+                        val read = channel.readAvailable(buffer, 0, buffer.size)
+                        if (read <= 0) break
+                        if (!writeAll(clientFd, buffer, read)) {
+                            clientDisconnected = true
+                            break
+                        }
+                        bytesSent += read
+                    }
                 }
+            }.onFailure { ex ->
+                lastDiagnostic = "GET falha na origem (tentativa $initialAttempt): ${ex.message}"
+                retryableFailure = true
             }
-        }.onFailure { ex ->
-            lastDiagnostic = "GET falha na origem: ${ex.message}"
+
+            if (retryableFailure && !headersSentToClient && !clientDisconnected && initialAttempt < 3) {
+                delay(450L * initialAttempt)
+            }
         }
 
         if (handledHls || clientDisconnected) return
+        if (!headersSentToClient) {
+            writeAll(clientFd, "HTTP/1.1 $lastErrorStatus Bad Gateway\r\nConnection: close\r\n\r\n".encodeToByteArray())
+            return
+        }
 
         // Reconexão transparente por Range no iOS/iPadOS caso a CDN encerre a conexão no meio do vídeo
         var resumeRetries = 0
@@ -745,12 +876,15 @@ private class IosDlnaHttpProxy private constructor(
             var chunkBytes = 0L
 
             runCatching {
-                httpClient.prepareGet(targetUrl) {
-                    applyUpstreamHeaders(rangeHeader = resumeRange)
-                }.execute { resp ->
+                executeStreamWithRedirects(
+                    client = streamHttpClient,
+                    initialUrl = targetUrl,
+                    rangeHeader = resumeRange,
+                    forceIdentityEncoding = true,
+                ) { resp, finalUrl ->
                     val validResume = (resp.status.value == 206) || (resp.status.value == 200 && nextOffset == 0L)
-                    if (!validResume) return@execute
-                    resumeUrl = resp.call.request.url.toString()
+                    if (!validResume) return@executeStreamWithRedirects
+                    resumeUrl = finalUrl
                     val channel = resp.bodyAsChannel()
                     val buffer = ByteArray(32 * 1024)
                     while (running && bytesSent < expectedLength) {
@@ -780,13 +914,15 @@ private class IosDlnaHttpProxy private constructor(
 
     /**
      * Mesma engine validada no Android e Desktop (para iPhone e iPad):
+     * - Redirects resolvidos manualmente para preservar a URL real final (corrige caminhos relativos HLS);
      * - TS puro: reconexão contínua + keepalive NULL + normalizador PTS/PCR/CC compartilhado;
-     * - HLS/Pluto TV: loop externo resiliente + muxer vídeo+áudio separado + renovação de tokens + keepalive NULL!
+     * - HLS/Pluto TV: loop externo resiliente + AES-128 + muxer vídeo+áudio separado + renovação de tokens + keepalive NULL!
      */
     private suspend fun handleLiveOrHlsAsTsStream(clientFd: Int, dlnaFeatures: String) {
         val normalizer = BestCineMpegTsTools.MpegTsNormalizer()
         var headersSent = false
         var reconnects = 0
+        var lastErrorStatus = 502
 
         while (running && reconnects < 30) {
             var clientDisconnected = false
@@ -794,25 +930,35 @@ private class IosDlnaHttpProxy private constructor(
             var streamedBytes = 0L
 
             runCatching {
-                httpClient.prepareGet(defaultUrl) {
-                    applyUpstreamHeaders(rangeHeader = null)
-                }.execute { resp ->
+                executeStreamWithRedirects(
+                    client = streamHttpClient,
+                    initialUrl = defaultUrl,
+                    rangeHeader = null,
+                    forceIdentityEncoding = false,
+                ) { resp, finalUrl ->
                     val statusCode = resp.status.value
                     if (statusCode !in 200..299) {
+                        lastErrorStatus = statusCode
                         lastDiagnostic = "Live origem retornou HTTP $statusCode"
-                        if (!headersSent && reconnects >= 2) {
+                        if (!headersSent && reconnects >= 4) {
                             writeAll(clientFd, "HTTP/1.1 $statusCode Bad Gateway\r\nConnection: close\r\n\r\n".encodeToByteArray())
                             clientDisconnected = true
                         }
-                        return@execute
+                        return@executeStreamWithRedirects
                     }
 
-                    val finalUrl = resp.call.request.url.toString()
                     val upstreamMime = resp.headers["Content-Type"]?.lowercase().orEmpty()
                     val channel = resp.bodyAsChannel()
                     val probeBuf = ByteArray(4096)
                     val probeRead = channel.readAvailable(probeBuf, 0, probeBuf.size).coerceAtLeast(0)
-                    val probeText = if (probeRead > 0) probeBuf.decodeToString(0, probeRead).trimStart() else ""
+                    val maybeHls = upstreamMime.contains("mpegurl") ||
+                        finalUrl.substringBefore('?').lowercase().endsWith(".m3u8") ||
+                        looksLikeM3u8Prefix(probeBuf, probeRead)
+                    val probeText = if (maybeHls && probeRead > 0) {
+                        probeBuf.decodeToString(0, probeRead).trimStart('\uFEFF', ' ', '\t', '\r', '\n')
+                    } else {
+                        ""
+                    }
                     val isHls = probeText.startsWith("#EXTM3U") ||
                         upstreamMime.contains("mpegurl") ||
                         finalUrl.substringBefore('?').lowercase().endsWith(".m3u8")
@@ -834,14 +980,14 @@ private class IosDlnaHttpProxy private constructor(
                         if (outcome.streamedAnySegment) {
                             streamedBytes = 512 * 1024L
                         }
-                        return@execute
+                        return@executeStreamWithRedirects
                     }
 
                     lastDiagnostic = "Live TS -> video/mp2t"
                     if (!headersSent) {
                         if (!writeLiveTsHeaders(clientFd, dlnaFeatures)) {
                             clientDisconnected = true
-                            return@execute
+                            return@executeStreamWithRedirects
                         }
                         headersSent = true
                     } else {
@@ -852,7 +998,7 @@ private class IosDlnaHttpProxy private constructor(
                         val normalized = normalizer.normalizeBytes(probeBuf, probeRead)
                         if (normalized.isNotEmpty() && !writeAll(clientFd, normalized)) {
                             clientDisconnected = true
-                            return@execute
+                            return@executeStreamWithRedirects
                         }
                         streamedBytes += probeRead
                     }
@@ -864,7 +1010,7 @@ private class IosDlnaHttpProxy private constructor(
                         val normalized = normalizer.normalizeBytes(buffer, read)
                         if (normalized.isNotEmpty() && !writeAll(clientFd, normalized)) {
                             clientDisconnected = true
-                            return@execute
+                            return@executeStreamWithRedirects
                         }
                         streamedBytes += read
                     }
@@ -874,6 +1020,10 @@ private class IosDlnaHttpProxy private constructor(
             }
 
             if (clientDisconnected) return
+            if (!headersSent && reconnects >= 4) {
+                writeAll(clientFd, "HTTP/1.1 $lastErrorStatus Bad Gateway\r\nConnection: close\r\n\r\n".encodeToByteArray())
+                return
+            }
             if (headersSent && !writeAll(clientFd, BestCineMpegTsTools.NULL_PACKET)) return
             if (streamedBytes > 128 * 1024L) {
                 reconnects = 0
@@ -881,7 +1031,7 @@ private class IosDlnaHttpProxy private constructor(
             } else {
                 reconnects += 1
             }
-            delay(if (wasHls) 900L else 550L)
+            delay(if (wasHls) 850L else 550L)
         }
     }
 
@@ -917,14 +1067,15 @@ private class IosDlnaHttpProxy private constructor(
                 }
                 return IosHlsOutcome(false, headersSent, false)
             }
-            videoMediaUrl = selected.videoPlaylistUrl
-            audioMediaUrl = selected.externalAudioPlaylistUrl
-            videoPlaylistText = fetchTextWithRetry(videoMediaUrl, attempts = 3) ?: run {
+            val fetchedVariant = fetchTextWithRedirectRetry(selected.videoPlaylistUrl, attempts = 3) ?: run {
                 if (!headersSent) {
                     writeAll(clientFd, "HTTP/1.1 502 Bad Gateway\r\nConnection: close\r\n\r\n".encodeToByteArray())
                 }
                 return IosHlsOutcome(false, headersSent, false)
             }
+            videoMediaUrl = fetchedVariant.first
+            videoPlaylistText = fetchedVariant.second
+            audioMediaUrl = selected.externalAudioPlaylistUrl
         }
 
         if (headersSent) {
@@ -932,6 +1083,7 @@ private class IosDlnaHttpProxy private constructor(
         }
 
         val sentKeys = LinkedHashSet<String>()
+        val keyCache = HashMap<String, ByteArray>()
         var lastStreamedSeq = -1L
         var isFirstPoll = true
         var consecutiveEmptyPolls = 0
@@ -959,6 +1111,15 @@ private class IosDlnaHttpProxy private constructor(
             }
             consecutiveEmptyPolls = 0
 
+            // Envia HTTP 200 assim que confirmamos segmentos válidos: evita timeout em Smart TVs
+            // durante o download/mux do primeiro segmento (especialmente canais de áudio separado como Pluto TV).
+            if (!headersSent) {
+                if (!writeLiveTsHeaders(clientFd, dlnaFeatures)) {
+                    return IosHlsOutcome(true, false, streamedAny)
+                }
+                headersSent = true
+            }
+
             if (lastStreamedSeq >= 0L && !parsedVideo.isVod) {
                 val firstSeq = segments.first().sequence
                 val lastSeq = segments.last().sequence
@@ -973,8 +1134,8 @@ private class IosDlnaHttpProxy private constructor(
             val curAudioUrl = audioMediaUrl
             if (curAudioUrl != null) {
                 var activeAudioUrl = curAudioUrl
-                var aText = fetchTextWithRetry(activeAudioUrl, attempts = 2)
-                if (aText == null) {
+                var audioFetched = fetchTextWithRedirectRetry(activeAudioUrl, attempts = 2)
+                if (audioFetched == null) {
                     val refreshed = refreshVideoAndAudioUrls(videoMediaUrl, activeAudioUrl, forceMaster = true)
                     val newAudioUrl = refreshed?.second
                     if (refreshed != null && newAudioUrl != null) {
@@ -982,11 +1143,13 @@ private class IosDlnaHttpProxy private constructor(
                         audioMediaUrl = newAudioUrl
                         activeAudioUrl = newAudioUrl
                         videoPlaylistText = refreshed.third
-                        aText = fetchTextWithRetry(newAudioUrl, attempts = 2)
+                        audioFetched = fetchTextWithRedirectRetry(newAudioUrl, attempts = 2)
                     }
                 }
-                if (aText != null) {
-                    audioBySeq = parseHlsMediaPlaylist(aText, activeAudioUrl).segments.associateBy { it.sequence }
+                if (audioFetched != null) {
+                    activeAudioUrl = audioFetched.first
+                    audioMediaUrl = activeAudioUrl
+                    audioBySeq = parseHlsMediaPlaylist(audioFetched.second, activeAudioUrl).segments.associateBy { it.sequence }
                 }
             }
 
@@ -1022,8 +1185,9 @@ private class IosDlnaHttpProxy private constructor(
 
                 val streamed = if (matchingAudioSeg != null) {
                     streamMuxedDualSegment(
-                        videoSegUrl = seg.url,
-                        audioSegUrl = matchingAudioSeg.url,
+                        videoSeg = seg,
+                        audioSeg = matchingAudioSeg,
+                        keyCache = keyCache,
                         normalizer = normalizer,
                         clientFd = clientFd,
                         sendHeadersFirst = !headersSent,
@@ -1031,7 +1195,8 @@ private class IosDlnaHttpProxy private constructor(
                     )
                 } else {
                     streamSingleSegmentChunked(
-                        segUrl = seg.url,
+                        seg = seg,
+                        keyCache = keyCache,
                         normalizer = normalizer,
                         clientFd = clientFd,
                         sendHeadersFirst = !headersSent,
@@ -1105,16 +1270,33 @@ private class IosDlnaHttpProxy private constructor(
 
     private enum class IosSegResult { OK, UPSTREAM_FAILED, CLIENT_DISCONNECTED }
 
+    private suspend fun fetchSegmentDecryptedBytes(
+        seg: IosHlsSegment,
+        keyCache: HashMap<String, ByteArray>,
+    ): ByteArray? {
+        val raw = fetchBytesWithRetry(seg.url, attempts = 2) ?: return null
+        val keyUri = seg.keyUri ?: return raw
+        val keyBytes = keyCache[keyUri] ?: (fetchBytesWithRetry(keyUri, attempts = 2) ?: ByteArray(0)).also {
+            if (it.size == 16) keyCache[keyUri] = it
+        }
+        return if (keyBytes.size == 16) {
+            BestCineMpegTsTools.decryptAes128CbcPkcs7(raw, keyBytes, seg.iv)
+        } else {
+            raw
+        }
+    }
+
     private suspend fun streamMuxedDualSegment(
-        videoSegUrl: String,
-        audioSegUrl: String,
+        videoSeg: IosHlsSegment,
+        audioSeg: IosHlsSegment,
+        keyCache: HashMap<String, ByteArray>,
         normalizer: BestCineMpegTsTools.MpegTsNormalizer,
         clientFd: Int,
         sendHeadersFirst: Boolean,
         dlnaFeatures: String,
     ): IosSegResult = coroutineScope {
-        val videoDeferred = async { fetchBytesWithRetry(videoSegUrl, attempts = 2) }
-        val audioDeferred = async { fetchBytesWithRetry(audioSegUrl, attempts = 2) }
+        val videoDeferred = async { fetchSegmentDecryptedBytes(videoSeg, keyCache) }
+        val audioDeferred = async { fetchSegmentDecryptedBytes(audioSeg, keyCache) }
         val videoBytes = videoDeferred.await() ?: return@coroutineScope IosSegResult.UPSTREAM_FAILED
         val audioBytes = audioDeferred.await()
 
@@ -1143,22 +1325,47 @@ private class IosDlnaHttpProxy private constructor(
     }
 
     private suspend fun streamSingleSegmentChunked(
-        segUrl: String,
+        seg: IosHlsSegment,
+        keyCache: HashMap<String, ByteArray>,
         normalizer: BestCineMpegTsTools.MpegTsNormalizer,
         clientFd: Int,
         sendHeadersFirst: Boolean,
         dlnaFeatures: String,
     ): IosSegResult {
+        // Segmentos AES-128 precisam ser decifrados antes de normalizar os pacotes TS de 188 bytes.
+        if (seg.keyUri != null) {
+            val decrypted = fetchSegmentDecryptedBytes(seg, keyCache) ?: return IosSegResult.UPSTREAM_FAILED
+            if (sendHeadersFirst && !writeLiveTsHeaders(clientFd, dlnaFeatures)) {
+                return IosSegResult.CLIENT_DISCONNECTED
+            }
+            var off = 0
+            val step = 16 * 1024
+            while (running && off < decrypted.size) {
+                val len = minOf(step, decrypted.size - off)
+                val slice = if (off == 0 && len == decrypted.size) decrypted else decrypted.copyOfRange(off, off + len)
+                val normalized = normalizer.normalizeBytes(slice, len)
+                if (normalized.isNotEmpty() && !writeAll(clientFd, normalized)) {
+                    return IosSegResult.CLIENT_DISCONNECTED
+                }
+                off += len
+            }
+            return IosSegResult.OK
+        }
+
         var result = IosSegResult.UPSTREAM_FAILED
         repeat(2) { attempt ->
             if (!running) return IosSegResult.CLIENT_DISCONNECTED
             runCatching {
-                httpClient.prepareGet(segUrl) {
-                    applyUpstreamHeaders(null)
-                }.execute { resp ->
-                    if (!resp.status.isSuccess()) return@execute
+                executeStreamWithRedirects(
+                    client = streamHttpClient,
+                    initialUrl = seg.url,
+                    rangeHeader = null,
+                    forceIdentityEncoding = false,
+                ) { resp, _ ->
+                    if (!resp.status.isSuccess()) return@executeStreamWithRedirects
                     val channel = resp.bodyAsChannel()
                     var headerWritten = !sendHeadersFirst
+                    var anyBytesWritten = false
                     val buf = ByteArray(16 * 1024)
                     while (running) {
                         val read = channel.readAvailable(buf, 0, buf.size)
@@ -1166,17 +1373,18 @@ private class IosDlnaHttpProxy private constructor(
                         if (!headerWritten) {
                             if (!writeLiveTsHeaders(clientFd, dlnaFeatures)) {
                                 result = IosSegResult.CLIENT_DISCONNECTED
-                                return@execute
+                                return@executeStreamWithRedirects
                             }
                             headerWritten = true
                         }
                         val normalized = normalizer.normalizeBytes(buf, read)
                         if (normalized.isNotEmpty() && !writeAll(clientFd, normalized)) {
                             result = IosSegResult.CLIENT_DISCONNECTED
-                            return@execute
+                            return@executeStreamWithRedirects
                         }
+                        anyBytesWritten = true
                     }
-                    if (headerWritten) result = IosSegResult.OK
+                    if (anyBytesWritten) result = IosSegResult.OK
                 }
             }
             if (result != IosSegResult.UPSTREAM_FAILED) return result
@@ -1191,20 +1399,18 @@ private class IosDlnaHttpProxy private constructor(
         forceMaster: Boolean = false,
     ): Triple<String, String?, String>? {
         if (!forceMaster) {
-            fetchText(currentVideoUrl)?.let { text ->
-                if (text.contains("#EXTM3U")) return Triple(currentVideoUrl, currentAudioUrl, text)
+            fetchTextWithRedirect(currentVideoUrl)?.let { (resolvedVideoUrl, text) ->
+                if (text.contains("#EXTM3U")) return Triple(resolvedVideoUrl, currentAudioUrl, text)
             }
         }
         return runCatching {
-            val resp = httpClient.get(defaultUrl) { applyUpstreamHeaders(null) }
-            if (!resp.status.isSuccess()) return@runCatching null
-            val resolvedUrl = resp.call.request.url.toString()
-            val text = resp.bodyAsText()
+            val master = fetchTextWithRedirect(defaultUrl) ?: return@runCatching null
+            val (resolvedUrl, text) = master
             if (!text.contains("#EXTM3U")) return@runCatching null
             if (text.contains("#EXT-X-STREAM-INF")) {
                 val selected = pickBestVariantWithAudio(text, resolvedUrl) ?: return@runCatching null
-                val variantText = fetchText(selected.videoPlaylistUrl) ?: return@runCatching null
-                Triple(selected.videoPlaylistUrl, selected.externalAudioPlaylistUrl, variantText)
+                val variant = fetchTextWithRedirect(selected.videoPlaylistUrl) ?: return@runCatching null
+                Triple(variant.first, selected.externalAudioPlaylistUrl, variant.second)
             } else {
                 Triple(resolvedUrl, null, text)
             }
@@ -1227,23 +1433,116 @@ private class IosDlnaHttpProxy private constructor(
         return s to e
     }
 
-    private fun io.ktor.client.request.HttpRequestBuilder.applyUpstreamHeaders(rangeHeader: String?) {
+    private fun isRedirectStatus(code: Int): Boolean =
+        code == 301 || code == 302 || code == 303 || code == 307 || code == 308
+
+    private fun extractUrlHost(url: String): String {
+        val afterScheme = url.substringAfter("://", "")
+        return afterScheme.substringBefore('/').substringBefore('?').lowercase()
+    }
+
+    private fun io.ktor.client.request.HttpRequestBuilder.applyUpstreamHeaders(
+        targetUrl: String,
+        rangeHeader: String?,
+        forceIdentityEncoding: Boolean = false,
+    ) {
+        val sameOriginAsDefault = extractUrlHost(targetUrl) == extractUrlHost(defaultUrl)
         defaultHeaders.forEach { (k, v) ->
-            if (!k.equals("host", ignoreCase = true) && !k.equals("range", ignoreCase = true)) {
-                header(k, v)
+            if (k.equals("host", ignoreCase = true) || k.equals("range", ignoreCase = true)) return@forEach
+            if (!sameOriginAsDefault &&
+                (k.equals("authorization", ignoreCase = true) || k.startsWith("x-bestcine-", ignoreCase = true))
+            ) {
+                return@forEach
             }
+            header(k, v)
         }
         if (!rangeHeader.isNullOrBlank()) {
             header("Range", rangeHeader)
+        }
+        if (forceIdentityEncoding && defaultHeaders.keys.none { it.equals("Accept-Encoding", ignoreCase = true) }) {
+            header("Accept-Encoding", "identity")
         }
         if (defaultHeaders.keys.none { it.equals("User-Agent", ignoreCase = true) }) {
             header("User-Agent", "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15")
         }
     }
 
-    private suspend fun fetchTextWithRetry(url: String, attempts: Int): String? {
+    private suspend fun executeStreamWithRedirects(
+        client: HttpClient,
+        initialUrl: String,
+        rangeHeader: String?,
+        forceIdentityEncoding: Boolean,
+        maxRedirects: Int = 10,
+        onFinalResponse: suspend (HttpResponse, String) -> Unit,
+    ) {
+        var currentUrl = initialUrl
+        for (hop in 0..maxRedirects) {
+            var nextUrl: String? = null
+            client.prepareGet(currentUrl) {
+                applyUpstreamHeaders(
+                    targetUrl = currentUrl,
+                    rangeHeader = rangeHeader,
+                    forceIdentityEncoding = forceIdentityEncoding,
+                )
+            }.execute { resp ->
+                val code = resp.status.value
+                val loc = resp.headers["Location"]?.trim()
+                if (isRedirectStatus(code) && !loc.isNullOrBlank() && hop < maxRedirects) {
+                    nextUrl = resolveRelativeHttpUrl(currentUrl, loc)
+                } else {
+                    onFinalResponse(resp, currentUrl)
+                }
+            }
+            val target = nextUrl ?: return
+            currentUrl = target
+        }
+    }
+
+    private suspend fun executeMetaHeadWithRedirects(
+        initialUrl: String,
+        maxRedirects: Int = 10,
+    ): Pair<HttpResponse, String>? {
+        var currentUrl = initialUrl
+        for (hop in 0..maxRedirects) {
+            val resp = metaHttpClient.head(currentUrl) {
+                applyUpstreamHeaders(
+                    targetUrl = currentUrl,
+                    rangeHeader = null,
+                    forceIdentityEncoding = true,
+                )
+            }
+            val code = resp.status.value
+            val loc = resp.headers["Location"]?.trim()
+            if (isRedirectStatus(code) && !loc.isNullOrBlank() && hop < maxRedirects) {
+                currentUrl = resolveRelativeHttpUrl(currentUrl, loc) ?: return resp to currentUrl
+                continue
+            }
+            return resp to currentUrl
+        }
+        return null
+    }
+
+    private suspend fun fetchTextWithRedirect(url: String, maxRedirects: Int = 10): Pair<String, String>? = runCatching {
+        var currentUrl = url
+        for (hop in 0..maxRedirects) {
+            val resp = metaHttpClient.get(currentUrl) {
+                applyUpstreamHeaders(targetUrl = currentUrl, rangeHeader = null)
+            }
+            val code = resp.status.value
+            val loc = resp.headers["Location"]?.trim()
+            if (isRedirectStatus(code) && !loc.isNullOrBlank() && hop < maxRedirects) {
+                currentUrl = resolveRelativeHttpUrl(currentUrl, loc) ?: return@runCatching null
+                continue
+            }
+            if (!resp.status.isSuccess()) return@runCatching null
+            return@runCatching currentUrl to resp.bodyAsText()
+        }
+        null
+    }.getOrNull()
+
+    private suspend fun fetchTextWithRedirectRetry(url: String, attempts: Int): Pair<String, String>? {
         repeat(attempts) { idx ->
-            fetchText(url)?.let { return it }
+            fetchTextWithRedirect(url)?.let { return it }
             if (idx + 1 < attempts && running) delay(350L)
         }
         return null
@@ -1252,35 +1551,60 @@ private class IosDlnaHttpProxy private constructor(
     private suspend fun fetchBytesWithRetry(url: String, attempts: Int): ByteArray? {
         repeat(attempts) { idx ->
             runCatching {
-                val resp = httpClient.get(url) { applyUpstreamHeaders(null) }
-                if (resp.status.isSuccess()) resp.bodyAsBytes() else null
+                var currentUrl = url
+                for (hop in 0..8) {
+                    val resp = metaHttpClient.get(currentUrl) {
+                        applyUpstreamHeaders(targetUrl = currentUrl, rangeHeader = null)
+                    }
+                    val code = resp.status.value
+                    val loc = resp.headers["Location"]?.trim()
+                    if (isRedirectStatus(code) && !loc.isNullOrBlank() && hop < 8) {
+                        currentUrl = resolveRelativeHttpUrl(currentUrl, loc) ?: return@runCatching null
+                        continue
+                    }
+                    return@runCatching if (resp.status.isSuccess()) resp.bodyAsBytes() else null
+                }
+                null
             }.getOrNull()?.let { return it }
             if (idx + 1 < attempts && running) delay(350L)
         }
         return null
     }
 
-    private suspend fun fetchText(url: String): String? = runCatching {
-        val resp = httpClient.get(url) { applyUpstreamHeaders(null) }
-        if (!resp.status.isSuccess()) return@runCatching null
-        resp.bodyAsText()
-    }.getOrNull()
+    private fun looksLikeM3u8Prefix(buf: ByteArray, len: Int): Boolean {
+        if (len <= 0) return false
+        var i = 0
+        if (len >= 3 && buf[0] == 0xEF.toByte() && buf[1] == 0xBB.toByte() && buf[2] == 0xBF.toByte()) {
+            i = 3
+        }
+        while (i < len && (buf[i] == 0x20.toByte() || buf[i] == 0x09.toByte() || buf[i] == 0x0D.toByte() || buf[i] == 0x0A.toByte())) {
+            i += 1
+        }
+        return i < len && buf[i] == '#'.code.toByte()
+    }
 
     private suspend fun readRemainingText(
         firstChunk: ByteArray,
         firstLen: Int,
         channel: io.ktor.utils.io.ByteReadChannel,
     ): String {
-        val sb = StringBuilder()
-        if (firstLen > 0) sb.append(firstChunk.decodeToString(0, firstLen))
-        val buf = ByteArray(16 * 1024)
-        while (running) {
-            val n = channel.readAvailable(buf, 0, buf.size)
-            if (n <= 0) break
-            sb.append(buf.decodeToString(0, n))
-            if (sb.length > 512 * 1024) break
+        val maxBytes = 512 * 1024
+        var total = firstLen.coerceAtMost(maxBytes)
+        var acc = ByteArray((total + 16 * 1024).coerceAtLeast(16 * 1024))
+        if (total > 0) {
+            firstChunk.copyInto(acc, destinationOffset = 0, startIndex = 0, endIndex = total)
         }
-        return sb.toString()
+        val buf = ByteArray(16 * 1024)
+        while (running && total < maxBytes) {
+            val n = channel.readAvailable(buf, 0, minOf(buf.size, maxBytes - total))
+            if (n <= 0) break
+            if (total + n > acc.size) {
+                acc = acc.copyOf(maxOf(acc.size * 2, total + n))
+            }
+            buf.copyInto(acc, destinationOffset = total, startIndex = 0, endIndex = n)
+            total += n
+        }
+        return acc.decodeToString(0, total)
     }
 
     private fun normalizeVideoMime(raw: String?, fallback: String): String {
@@ -1296,6 +1620,8 @@ private class IosDlnaHttpProxy private constructor(
     private data class IosHlsSegment(
         val url: String,
         val sequence: Long,
+        val keyUri: String?,
+        val iv: ByteArray,
         val precededByDiscontinuity: Boolean,
     )
 
@@ -1370,6 +1696,8 @@ private class IosDlnaHttpProxy private constructor(
         var targetDuration = 4
         var mediaSeq = 0L
         var isVod = false
+        var currentKeyUri: String? = null
+        var currentKeyIv: ByteArray? = null
         var nextDiscontinuity = false
 
         for (raw in text.lineSequence()) {
@@ -1386,10 +1714,30 @@ private class IosDlnaHttpProxy private constructor(
                     nextDiscontinuity = true
                 }
                 line.startsWith("#EXT-X-ENDLIST") -> isVod = true
+                line.startsWith("#EXT-X-KEY:") -> {
+                    if (line.contains("METHOD=AES-128", ignoreCase = true)) {
+                        val uriRel = Regex("""URI="([^"]+)"""").find(line)?.groupValues?.getOrNull(1)
+                        currentKeyUri = uriRel?.let { resolveRelativeHttpUrl(baseUrl, it) }
+                        val ivHex = Regex("""IV=0x([0-9A-Fa-f]+)""").find(line)?.groupValues?.getOrNull(1)
+                        currentKeyIv = ivHex?.let(BestCineMpegTsTools::hexToIv16)
+                    } else if (line.contains("METHOD=NONE", ignoreCase = true)) {
+                        currentKeyUri = null
+                        currentKeyIv = null
+                    }
+                }
                 !line.startsWith("#") -> {
                     val resolved = resolveRelativeHttpUrl(baseUrl, line) ?: continue
                     val seq = mediaSeq + segments.size
-                    segments.add(IosHlsSegment(resolved, seq, nextDiscontinuity))
+                    val iv = currentKeyIv ?: BestCineMpegTsTools.sequenceToIv16(seq)
+                    segments.add(
+                        IosHlsSegment(
+                            url = resolved,
+                            sequence = seq,
+                            keyUri = currentKeyUri,
+                            iv = iv,
+                            precededByDiscontinuity = nextDiscontinuity,
+                        ),
+                    )
                     nextDiscontinuity = false
                 }
             }
@@ -1422,18 +1770,25 @@ private class IosDlnaHttpProxy private constructor(
         pfd.events = POLLIN.convert()
         val chunk = ByteArray(2048)
         val sb = StringBuilder()
-        val deadlineMs = currentTimeMillisIos() + 5_000L
+        val deadlineMs = currentTimeMillisIos() + 8_000L
 
         while (running && sb.length < 8192) {
             val remaining = (deadlineMs - currentTimeMillisIos()).coerceAtMost(500L)
             if (remaining <= 0L) break
             val ready = poll(pfd.ptr, 1u, remaining.toInt())
-            if (ready < 0) break
+            if (ready < 0) {
+                if (errno == EINTR) continue
+                break
+            }
             if (ready == 0) continue
             val n = chunk.usePinned { pinned ->
                 recv(clientFd, pinned.addressOf(0), chunk.size.convert(), 0).toInt()
             }
-            if (n <= 0) break
+            if (n < 0) {
+                if (errno == EINTR || errno == EAGAIN) continue
+                break
+            }
+            if (n == 0) break
             sb.append(chunk.decodeToString(0, n))
             if (sb.indexOf("\r\n\r\n") >= 0) break
         }
@@ -1451,7 +1806,11 @@ private class IosDlnaHttpProxy private constructor(
                     (length - offset).convert(),
                     0,
                 ).toInt()
-                if (sent <= 0) return@usePinned false
+                if (sent < 0) {
+                    if (errno == EINTR) continue
+                    return@usePinned false
+                }
+                if (sent == 0) return@usePinned false
                 offset += sent
             }
             true
@@ -1464,6 +1823,15 @@ private class IosDlnaHttpProxy private constructor(
             val one = alloc<IntVar>()
             one.value = 1
             setsockopt(fd, SOL_SOCKET, SO_NOSIGPIPE, one.ptr, sizeOf<IntVar>().convert())
+        }
+
+        private fun configureClientSocket(fd: Int) = memScoped {
+            if (fd < 0) return@memScoped
+            val one = alloc<IntVar>()
+            one.value = 1
+            setsockopt(fd, SOL_SOCKET, SO_NOSIGPIPE, one.ptr, sizeOf<IntVar>().convert())
+            setsockopt(fd, SOL_SOCKET, SO_KEEPALIVE, one.ptr, sizeOf<IntVar>().convert())
+            setsockopt(fd, IPPROTO_TCP, TCP_NODELAY, one.ptr, sizeOf<IntVar>().convert())
         }
 
         fun create(

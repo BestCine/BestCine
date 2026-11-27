@@ -4,6 +4,7 @@ import com.nuvio.app.bestcine.catalog.BestCineStreamingCatalogs
 import com.nuvio.app.core.i18n.localizedMediaTypeLabel
 import com.nuvio.app.features.addons.AddonCatalog
 import com.nuvio.app.features.addons.AddonManifest
+import com.nuvio.app.features.addons.AddonRepository
 import com.nuvio.app.features.addons.ManagedAddon
 import com.nuvio.app.features.addons.enabledAddons
 import com.nuvio.app.features.catalog.supportsPagination
@@ -73,38 +74,43 @@ internal fun buildBuiltinCinemetaHomeDefinitions(): List<HomeCatalogDefinition> 
 )
 
 fun buildHomeCatalogDefinitions(addons: List<ManagedAddon>): List<HomeCatalogDefinition> {
+    val showBestCineDefaults = HomeCatalogSettingsRepository.showBestCineDefaultCatalogs()
     val activeManifestAddons = addons.enabledAddons().mapNotNull { addon ->
         val manifest = addon.manifest ?: return@mapNotNull null
         addon to manifest
     }
-    val builtinCinemetaDefs = if (activeManifestAddons.isNotEmpty()) {
+    val builtinCinemetaDefs = if (showBestCineDefaults && activeManifestAddons.isNotEmpty()) {
         buildBuiltinCinemetaHomeDefinitions()
     } else {
         emptyList()
     }
-    val addonDefs = activeManifestAddons.flatMap { (addon, manifest) ->
-        manifest.catalogs
-            .filter { catalog -> catalog.extra.none { it.isRequired } }
-            .map { catalog ->
-                HomeCatalogDefinition(
-                    key = "${manifest.id}:${catalog.type}:${catalog.id}",
-                    defaultTitle = runBlocking {
-                        getString(
-                            Res.string.home_catalog_default_title,
-                            catalog.name,
-                            localizedMediaTypeLabel(catalog.type),
-                        )
-                    },
-                    catalogName = catalog.name,
-                    addonName = addon.displayTitle,
-                    manifestUrl = addon.manifestUrl,
-                    type = catalog.type,
-                    catalogId = catalog.id,
-                    supportsPagination = catalog.supportsPagination(),
-                    descriptorSignature = buildHomeCatalogDescriptorSignature(addon, manifest, catalog),
-                )
-            }
-    }
+    val addonDefs = activeManifestAddons
+        .filter { (addon, _) ->
+            showBestCineDefaults || !AddonRepository.isBestCineOfficialAddonUrl(addon.manifestUrl)
+        }
+        .flatMap { (addon, manifest) ->
+            manifest.catalogs
+                .filter { catalog -> catalog.extra.none { it.isRequired } }
+                .map { catalog ->
+                    HomeCatalogDefinition(
+                        key = "${manifest.id}:${catalog.type}:${catalog.id}",
+                        defaultTitle = runBlocking {
+                            getString(
+                                Res.string.home_catalog_default_title,
+                                catalog.name,
+                                localizedMediaTypeLabel(catalog.type),
+                            )
+                        },
+                        catalogName = catalog.name,
+                        addonName = addon.displayTitle,
+                        manifestUrl = addon.manifestUrl,
+                        type = catalog.type,
+                        catalogId = catalog.id,
+                        supportsPagination = catalog.supportsPagination(),
+                        descriptorSignature = buildHomeCatalogDescriptorSignature(addon, manifest, catalog),
+                    )
+                }
+        }
     val streamingDefs = BestCineStreamingCatalogs.buildHomeDefinitions(
         HomeCatalogSettingsRepository.streamingCatalogConfig(),
     )

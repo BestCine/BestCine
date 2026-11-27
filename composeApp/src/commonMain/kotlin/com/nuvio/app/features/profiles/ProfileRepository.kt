@@ -227,7 +227,9 @@ object ProfileRepository {
     }
 
     suspend fun pullProfiles() {
-        if (AuthRepository.state.value.isAnonymous) {
+        // BestCine: perfis são gerenciados localmente com a conta BestCine.
+        // Conectar a Conta Nuvio em Rastreamento sincroniza apenas progresso, assistidos e biblioteca.
+        if (AuthRepository.state.value.isAnonymous || BestCineAccountRepository.state.value.isConnected) {
             if (_state.value.profiles.isEmpty()) {
                 val uid = (AuthRepository.state.value as? AuthState.Authenticated)?.userId ?: "local"
                 ensureDefaultLocalProfile(uid)

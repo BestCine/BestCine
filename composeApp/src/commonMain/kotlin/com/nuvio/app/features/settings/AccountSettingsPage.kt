@@ -315,7 +315,10 @@ private fun BestCineDnsCard() {
 
         Spacer(modifier = Modifier.height(12.dp))
         NuvioPrimaryButton(
-            text = if (dnsState.isTesting) "Testando DNS..." else "Testar DNS agora (example.invalid)",
+            text = if (dnsState.isTesting) "Testando DNS..." else {
+                val host = BestCineBranding.PRODUCTION_HOST
+                if (host.isNotBlank()) "Testar DNS agora ($host)" else "Testar DNS agora"
+            },
             enabled = !dnsState.isTesting,
             onClick = {
                 scope.launch { BestCineDnsSettingsRepository.runDiagnosticTest() }

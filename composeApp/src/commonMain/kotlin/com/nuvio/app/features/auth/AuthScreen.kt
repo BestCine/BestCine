@@ -849,7 +849,7 @@ private fun AuthForm(
                     textAlign = TextAlign.Center,
                 )
                 Text(
-                    text = "Aponte a câmera do celular para o QR Code ou acesse ${tvQrState.verifyBaseUrl.ifBlank { "example.invalid/tv" }} e clique em Autorizar TV.",
+                    text = "Aponte a câmera do celular para o QR Code ou acesse ${tvQrState.verifyBaseUrl.ifBlank { BestCineBranding.PRODUCTION_HOST.takeIf { it.isNotBlank() }?.let { "$it/tv" } ?: "a página de vínculo da sua conta" }} e clique em Autorizar TV.",
                     style = MaterialTheme.typography.bodySmall.copy(
                         color = AuthTextSecondary,
                         fontSize = (12.5f * scale).sp,

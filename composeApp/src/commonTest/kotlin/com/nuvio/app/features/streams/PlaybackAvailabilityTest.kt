@@ -28,8 +28,9 @@ class PlaybackAvailabilityTest {
     fun `stream addons must support the requested type and id`() {
         val addons = listOf(addon())
         assertFalse(available(addons = addons, type = "series"))
-        assertFalse(available(addons = addons, videoId = "kitsu:123"))
-        assertTrue(available(addons = listOf(addon(prefixes = emptyList())), videoId = "kitsu:123"))
+        assertFalse(available(addons = addons, videoId = "custom:123"))
+        assertTrue(available(addons = addons, videoId = "kitsu:123"))
+        assertTrue(available(addons = listOf(addon(prefixes = emptyList())), videoId = "custom:123"))
     }
 
     @Test
@@ -54,6 +55,15 @@ class PlaybackAvailabilityTest {
         ))
     }
 
+    @Test
+    fun `external third-party stream addons are blocked by BestCine stream policy`() {
+        val externalStreamAddon = addon(
+            resource = "stream",
+            manifestUrl = "https://example.com/manifest.json",
+        )
+        assertFalse(available(addons = listOf(externalStreamAddon)))
+    }
+
     private fun available(
         addons: List<ManagedAddon> = emptyList(),
         plugins: PluginsUiState = PluginsUiState(),
@@ -64,8 +74,9 @@ class PlaybackAvailabilityTest {
     private fun addon(
         resource: String = "stream",
         prefixes: List<String> = listOf("tt"),
+        manifestUrl: String = "https://server.bestcine.test/bc_test/manifest.json",
     ): ManagedAddon = ManagedAddon(
-        manifestUrl = "https://example.com/manifest.json",
+        manifestUrl = manifestUrl,
         manifest = AddonManifest(
             id = "test",
             name = "Test",
@@ -73,7 +84,7 @@ class PlaybackAvailabilityTest {
             version = "1.0.0",
             resources = listOf(AddonResource(resource, listOf("movie"), prefixes)),
             types = listOf("movie"),
-            transportUrl = "https://example.com",
+            transportUrl = manifestUrl.removeSuffix("/manifest.json"),
         ),
     )
 

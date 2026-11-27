@@ -30,4 +30,15 @@ actual object AuthStorage {
     actual fun saveFlag(key: String, value: Boolean) {
         preferences?.edit()?.putBoolean(key, value)?.apply()
     }
+
+    actual fun loadSupabaseSessionJson(): String? =
+        preferences?.getString("supabase_session_json", null)
+
+    actual fun saveSupabaseSessionJson(sessionJson: String) {
+        preferences?.edit()?.putString("supabase_session_json", sessionJson)?.apply()
+    }
+
+    actual fun clearSupabaseSessionJson() {
+        preferences?.edit()?.remove("supabase_session_json")?.apply()
+    }
 }

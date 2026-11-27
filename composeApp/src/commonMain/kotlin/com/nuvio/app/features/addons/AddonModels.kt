@@ -40,6 +40,15 @@ val AddonManifest.isTrackingAddon: Boolean
         resource.name == ADDON_PLAYER_RESOURCE || resource.name == ADDON_LIBRARY_RESOURCE
     }
 
+val AddonManifest.declaresStreamResource: Boolean
+    get() = resources.any { resource ->
+        resource.name.equals("stream", ignoreCase = true)
+    }
+
+// Permite qualquer addon externo que NAO declare recurso "stream" (catalogos, legendas, metadados, etc.).
+val AddonManifest.isCatalogOnlyAllowed: Boolean
+    get() = !declaresStreamResource
+
 data class AddonCatalog(
     val type: String,
     val id: String,

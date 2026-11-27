@@ -22,4 +22,15 @@ actual object AuthStorage {
     actual fun saveFlag(key: String, value: Boolean) {
         NSUserDefaults.standardUserDefaults.setBool(value, forKey = key)
     }
+
+    actual fun loadSupabaseSessionJson(): String? =
+        NSUserDefaults.standardUserDefaults.stringForKey("supabase_session_json")
+
+    actual fun saveSupabaseSessionJson(sessionJson: String) {
+        NSUserDefaults.standardUserDefaults.setObject(sessionJson, forKey = "supabase_session_json")
+    }
+
+    actual fun clearSupabaseSessionJson() {
+        NSUserDefaults.standardUserDefaults.removeObjectForKey("supabase_session_json")
+    }
 }

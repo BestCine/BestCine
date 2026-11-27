@@ -24,6 +24,7 @@ import com.nuvio.app.features.streams.withoutPendingGroups
 import com.nuvio.app.features.streams.StreamsUiState
 import com.nuvio.app.features.streams.sortedForGroupedDisplay
 import com.nuvio.app.features.streams.streamAddonInstanceId
+import com.nuvio.app.features.streams.isAllowedStreamProvider
 import com.nuvio.app.features.streams.supportsStream
 import com.nuvio.app.features.streams.toEmptyStateReason
 import com.nuvio.app.features.streams.toPluginProviderGroups
@@ -258,6 +259,7 @@ object PlayerStreamsRepository {
         }
 
         val streamAddons = installedAddons
+            .filter { it.isAllowedStreamProvider() }
             .mapNotNull { addon ->
                 val manifest = addon.manifest ?: return@mapNotNull null
                 if (!manifest.supportsStream(type, videoId)) return@mapNotNull null

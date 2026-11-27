@@ -189,11 +189,14 @@ actual fun rememberIsInPictureInPicture(): Boolean {
 internal actual fun rememberPlatformPlayerGestureController(): PlayerGestureController? {
     val context = LocalContext.current
     val activity = context.findActivity() ?: return null
+    val view = LocalView.current
+    val window = (view.parent as? DialogWindowProvider)?.window ?: activity.window
     val audioManager = context.getSystemService(Context.AUDIO_SERVICE) as? AudioManager ?: return null
 
-    val controller = remember(activity, audioManager) {
+    val controller = remember(activity, window, audioManager) {
         AndroidPlayerGestureController(
             activity = activity,
+            window = window,
             audioManager = audioManager,
         )
     }
@@ -221,13 +224,14 @@ private fun Activity.shouldForceLandscapePlayer(): Boolean {
 
 private class AndroidPlayerGestureController(
     private val activity: Activity,
+    private val window: android.view.Window,
     private val audioManager: AudioManager,
 ) : PlayerGestureController {
-    private val originalBrightness = activity.window.attributes.screenBrightness
+    private val originalBrightness = window.attributes.screenBrightness
     private var brightnessRestored = false
 
     override fun currentBrightness(): Float {
-        val windowValue = activity.window.attributes.screenBrightness
+        val windowValue = window.attributes.screenBrightness
         return if (windowValue in 0f..1f) {
             windowValue.coerceIn(0f, 1f)
         } else {
@@ -237,9 +241,9 @@ private class AndroidPlayerGestureController(
 
     override fun setBrightness(level: Float): Float {
         val target = level.coerceIn(0f, 1f)
-        val attributes = activity.window.attributes
+        val attributes = window.attributes
         attributes.screenBrightness = target
-        activity.window.attributes = attributes
+        window.attributes = attributes
         return target
     }
 
@@ -270,12 +274,12 @@ private class AndroidPlayerGestureController(
         if (brightnessRestored) return
         brightnessRestored = true
 
-        val attributes = activity.window.attributes
+        val attributes = window.attributes
         attributes.screenBrightness = when {
             originalBrightness < 0f -> WindowManager.LayoutParams.BRIGHTNESS_OVERRIDE_NONE
             else -> originalBrightness.coerceIn(0f, 1f)
         }
-        activity.window.attributes = attributes
+        window.attributes = attributes
     }
 
     private fun readSystemBrightness(): Float =

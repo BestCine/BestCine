@@ -173,7 +173,7 @@ object BestCineCastController {
                 // Em TV Ao Vivo, aguarda o player local (ExoPlayer/mpv) fechar a conexão IPTV
                 // antes da TV conectar, evitando conflito de 2 conexões simultâneas ("Arquivo não suportado").
                 if (isHlsOrLive) {
-                    delay(450L)
+                    delay(700L)
                 }
 
                 // Sempre tenta proxy local primeiro (resolve DoH, TLS 1.3 para TVs antigas, headers e HLS->TS)

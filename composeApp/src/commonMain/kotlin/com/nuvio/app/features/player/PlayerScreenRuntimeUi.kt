@@ -219,71 +219,71 @@ internal fun PlayerScreenRuntime.RenderPlayerRuntimeUi(
         releaseInFlight = playerReleaseSurfaceRetention.inFlight,
         desktop = isDesktop,
     )
-    val openingOverlayWanted = playerSettingsUiState.showLoadingOverlay &&
-        !initialLoadCompleted &&
-        errorMessage == null
-    val episodeText = if (seasonNumber != null && episodeNumber != null && !episodeTitle.isNullOrBlank()) {
-        stringResource(
-            Res.string.compose_player_episode_title_format,
-            seasonNumber,
-            episodeNumber,
-            episodeTitle.orEmpty(),
-        )
-    } else {
-        ""
-    }
-    val allFilterLabel = stringResource(Res.string.collections_tab_all)
-    val playingLabel = stringResource(Res.string.compose_player_playing)
-    val sourceFilters = buildPlayerControlFilters(
-        allLabel = allFilterLabel,
-        selectedFilter = null,
-    )
-    val sourceItems = buildPlayerControlSourceItems()
-    val episodeItems = buildPlayerControlEpisodeItems()
-    val episodeSeasons = buildPlayerControlSeasonItems(episodeItems)
-    val episodeStreamFilters = buildPlayerControlEpisodeStreamFilters(
-        allLabel = allFilterLabel,
-        selectedFilter = null,
-    )
-    val episodeStreamItems = buildPlayerControlEpisodeStreamItems()
-    val playerControlAddonSubtitles = buildPlayerControlAddonSubtitleItems()
-    val playerControlSubtitleSelection = buildPlayerControlSubtitleSelection()
-    val playerControlAutoSyncCues = buildPlayerControlSubtitleCueItems()
-    val themeColors = MaterialTheme.nuvio.colors
-    val selectedEpisodeLabel = episodeStreamsPanelState.selectedEpisode?.let { selected ->
-        val selectedCode = selected.playerControlsEpisodeCode()
-        buildString {
-            append(selectedCode)
-            if (selected.title.isNotBlank()) {
-                if (isNotEmpty()) append(" • ")
-                append(selected.title)
-            }
-        }
-    }.orEmpty()
-    val nativeSkipInterval = activeSkipInterval.takeIf {
-        initialLoadCompleted && !pausedOverlayVisible && !skipIntervalDismissed
-    }
-    val nativeSkipAction = nativeSkipInterval?.internalSkipAction(skipIntervals, playbackSnapshot.durationMs)
-    val nextEpisodeForControls = nextEpisodeInfo.takeIf { 
-        isSeries && (showNextEpisodeCard || nextEpisodeAutoPlaySearching || nextEpisodeAutoPlayCountdown != null) 
-    }
-    val nextEpisodeStatus = when {
-        nextEpisodeForControls == null -> ""
-        !nextEpisodeForControls.hasAired && !nextEpisodeForControls.unairedMessage.isNullOrBlank() ->
-            nextEpisodeForControls.unairedMessage.orEmpty()
-        nextEpisodeAutoPlaySearching -> stringResource(Res.string.player_next_episode_finding_source)
-        !nextEpisodeAutoPlaySourceName.isNullOrBlank() && nextEpisodeAutoPlayCountdown != null ->
+    val playerControlsState = if (isDesktop) {
+        val openingOverlayWanted = playerSettingsUiState.showLoadingOverlay &&
+            !initialLoadCompleted &&
+            errorMessage == null
+        val episodeText = if (seasonNumber != null && episodeNumber != null && !episodeTitle.isNullOrBlank()) {
             stringResource(
-                Res.string.player_next_episode_playing_via_countdown,
-                nextEpisodeAutoPlaySourceName.orEmpty(),
-                nextEpisodeAutoPlayCountdown ?: 0,
+                Res.string.compose_player_episode_title_format,
+                seasonNumber,
+                episodeNumber,
+                episodeTitle.orEmpty(),
             )
-        else -> ""
-    }
-    val partyControls = if (isDesktop) rememberPartyControlsState() else PlayerControlPartyState()
-    val playerBadges = if (isDesktop) rememberPlayerBadges() else emptyList()
-    val installedSubtitleFonts = remember(showSubtitleModal, subtitleFontsRevision) { if (isDesktop) SubtitleFonts.installed() else emptyList() }
-    if (isDesktop) {
+        } else {
+            ""
+        }
+        val allFilterLabel = stringResource(Res.string.collections_tab_all)
+        val playingLabel = stringResource(Res.string.compose_player_playing)
+        val sourceFilters = buildPlayerControlFilters(
+            allLabel = allFilterLabel,
+            selectedFilter = null,
+        )
+        val sourceItems = buildPlayerControlSourceItems()
+        val episodeItems = buildPlayerControlEpisodeItems()
+        val episodeSeasons = buildPlayerControlSeasonItems(episodeItems)
+        val episodeStreamFilters = buildPlayerControlEpisodeStreamFilters(
+            allLabel = allFilterLabel,
+            selectedFilter = null,
+        )
+        val episodeStreamItems = buildPlayerControlEpisodeStreamItems()
+        val playerControlAddonSubtitles = buildPlayerControlAddonSubtitleItems()
+        val playerControlSubtitleSelection = buildPlayerControlSubtitleSelection()
+        val playerControlAutoSyncCues = buildPlayerControlSubtitleCueItems()
+        val themeColors = MaterialTheme.nuvio.colors
+        val selectedEpisodeLabel = episodeStreamsPanelState.selectedEpisode?.let { selected ->
+            val selectedCode = selected.playerControlsEpisodeCode()
+            buildString {
+                append(selectedCode)
+                if (selected.title.isNotBlank()) {
+                    if (isNotEmpty()) append(" • ")
+                    append(selected.title)
+                }
+            }
+        }.orEmpty()
+        val nativeSkipInterval = activeSkipInterval.takeIf {
+            initialLoadCompleted && !pausedOverlayVisible && !skipIntervalDismissed
+        }
+        val nativeSkipAction = nativeSkipInterval?.internalSkipAction(skipIntervals, playbackSnapshot.durationMs)
+        val nextEpisodeForControls = nextEpisodeInfo.takeIf {
+            isSeries && (showNextEpisodeCard || nextEpisodeAutoPlaySearching || nextEpisodeAutoPlayCountdown != null)
+        }
+        val nextEpisodeStatus = when {
+            nextEpisodeForControls == null -> ""
+            !nextEpisodeForControls.hasAired && !nextEpisodeForControls.unairedMessage.isNullOrBlank() ->
+                nextEpisodeForControls.unairedMessage.orEmpty()
+            nextEpisodeAutoPlaySearching -> stringResource(Res.string.player_next_episode_finding_source)
+            !nextEpisodeAutoPlaySourceName.isNullOrBlank() && nextEpisodeAutoPlayCountdown != null ->
+                stringResource(
+                    Res.string.player_next_episode_playing_via_countdown,
+                    nextEpisodeAutoPlaySourceName.orEmpty(),
+                    nextEpisodeAutoPlayCountdown ?: 0,
+                )
+            else -> ""
+        }
+        val partyControls = rememberPartyControlsState()
+        val playerBadges = rememberPlayerBadges()
+        val installedSubtitleFonts = remember(showSubtitleModal, subtitleFontsRevision) { SubtitleFonts.installed() }
         val importSubtitleFont = rememberSubtitleFontImporter { result ->
             subtitleFontImportFailed = result.isFailure
             result.getOrNull()?.let {
@@ -294,12 +294,10 @@ internal fun PlayerScreenRuntime.RenderPlayerRuntimeUi(
         LaunchedEffect(subtitleFontImportToken) {
             if (subtitleFontImportToken > 0) importSubtitleFont()
         }
-    }
-    val subtitleFontItems = BuiltInSubtitleFonts.map {
-        PlayerControlSubtitleFont(it, subtitleFontLabel(it, installedSubtitleFonts))
-    } + installedSubtitleFonts.map { PlayerControlSubtitleFont(it.id, it.name) }
-    val streamInfoSections = if (isDesktop) {
-        rememberStreamInfoSections(
+        val subtitleFontItems = BuiltInSubtitleFonts.map {
+            PlayerControlSubtitleFont(it, subtitleFontLabel(it, installedSubtitleFonts))
+        } + installedSubtitleFonts.map { PlayerControlSubtitleFont(it.id, it.name) }
+        val streamInfoSections = rememberStreamInfoSections(
             addonName = activeProviderName,
             addonLogo = activeAddonLogo,
             streamName = activeStreamTitle,
@@ -311,14 +309,13 @@ internal fun PlayerScreenRuntime.RenderPlayerRuntimeUi(
             subtitleTrack = subtitleTracks.firstOrNull { it.index == selectedSubtitleIndex }.takeIf { !useCustomSubtitles },
             addonSubtitle = selectedAddonSubtitle.takeIf { useCustomSubtitles },
         )
-    } else emptyList()
-    val controlChapters = chapters.mapIndexed { index, chapter ->
-        PlayerControlChapter(
-            startMs = chapter.startMs,
-            title = chapter.title ?: stringResource(Res.string.compose_player_chapter_number, index + 1),
-        )
-    }
-    val playerControlsState = PlayerControlsState(
+        val controlChapters = chapters.mapIndexed { index, chapter ->
+            PlayerControlChapter(
+                startMs = chapter.startMs,
+                title = chapter.title ?: stringResource(Res.string.compose_player_chapter_number, index + 1),
+            )
+        }
+        PlayerControlsState(
         chapters = controlChapters,
         chapterTitleEnabled = playerSettingsUiState.chapterTitleEnabled,
         chaptersLabel = stringResource(Res.string.compose_player_chapters),
@@ -558,7 +555,10 @@ internal fun PlayerScreenRuntime.RenderPlayerRuntimeUi(
             stringResource(Res.string.player_next_episode_unaired)
         },
         nextEpisodePlayable = nextEpisodeInfo?.hasAired == true,
-    )
+        )
+    } else {
+        PlayerControlsState()
+    }
     val gestureCallbacks = rememberSurfaceGestureCallbacks()
     val fold = LocalFold.current?.takeIf { !isInPip }
     val videoModifier = if (fold != null) Modifier.fillMaxWidth().height(fold.top) else Modifier.fillMaxSize()
@@ -762,7 +762,7 @@ internal fun PlayerScreenRuntime.RenderPlayerRuntimeUi(
                 panelVisible = showPartyPanel && !isInPip,
             )
         }
-        RenderPlayerModals(displayedPositionMs = displayedPositionMs)
+        RenderPlayerModals(displayedPositionMsProvider = { scrubbingPositionMs ?: playbackSnapshot.positionMs })
     }
 }
 
@@ -1213,6 +1213,7 @@ internal fun PlayerScreenRuntime.handlePlayerControlsEvent(type: String, value: 
             preferredSubtitleSelectionApplied = true
             selectedSubtitleIndex = index
             selectedAddonSubtitleId = null
+            activeAddonSubtitle = null
             useCustomSubtitles = false
             persistInternalSubtitlePreference(subtitleTracks.firstOrNull { it.index == index })
             if (wasCustom) {
@@ -1244,6 +1245,7 @@ internal fun PlayerScreenRuntime.handlePlayerControlsEvent(type: String, value: 
             }
             isUserExplicitSubtitleSelection = true
             selectedAddonSubtitleId = addon.selectionKey
+            activeAddonSubtitle = addon
             selectedSubtitleIndex = -1
             useCustomSubtitles = true
             preferredSubtitleSelectionApplied = true
@@ -1777,6 +1779,7 @@ private data class PlayerControlSubtitleSelection(
 @Composable
 private fun PlayerScreenRuntime.buildPlayerControlSubtitleSelection(): PlayerControlSubtitleSelection {
     val autoSyncedUrl by AutoSyncSyncedSubtitle.url.collectAsState()
+    val visibleAddons = visibleAddonSubtitles
     val selectedAddon = selectedAddonSubtitle
     var selectedLanguageKey = "__off__"
     var selectedOptionId = ""
@@ -1794,7 +1797,7 @@ private fun PlayerScreenRuntime.buildPlayerControlSubtitleSelection(): PlayerCon
     }
     val languageItems = buildSubtitleLanguageItems(
         subtitleTracks = subtitleTracks,
-        addonSubtitles = visibleAddonSubtitles,
+        addonSubtitles = visibleAddons,
         preferredLanguage = playerSettingsUiState.preferredSubtitleLanguage,
         secondaryPreferredLanguage = playerSettingsUiState.secondaryPreferredSubtitleLanguage,
         showOnlyPreferredLanguages = subtitleStyle.showOnlyPreferredLanguages,
@@ -1817,45 +1820,56 @@ private fun PlayerScreenRuntime.buildPlayerControlSubtitleSelection(): PlayerCon
             isSelected = item.key == selectedLanguageKey,
         )
     }
+    val addonsByLanguage = remember(visibleAddons) {
+        visibleAddons.withIndex().groupBy { subtitleLanguageKey(it.value.language) }
+    }
+    val languageLabelByKey = languages.associate { it.key to it.label }
     val options = languageItems.flatMap { language ->
-        buildSubtitleSelectionOptions(
-            languageKey = language.key,
-            subtitleTracks = subtitleTracks,
-            addonSubtitles = visibleAddonSubtitles,
-        ).map { option ->
-            when (option) {
-                is SubtitleSelectionOption.BuiltIn -> PlayerControlSubtitleOptionItem(
-                    id = option.id,
-                    languageKey = language.key,
-                    kind = "builtIn",
-                    index = option.track.index,
-                    sourceLabel = builtInLabel,
-                    title = localizedTrackDisplayName(
-                        option.track.label,
-                        option.track.language,
-                        option.track.index,
-                    ),
-                    metadata = forcedLabel.takeIf { option.track.isForced }.orEmpty(),
-                    isSelected = option.id == selectedOptionId,
-                )
-
-                is SubtitleSelectionOption.Addon -> {
-                    val title = languageLabelForCode(option.subtitle.language)
+        if (language.key == SubtitleOffLanguageKey) {
+            emptyList()
+        } else {
+            val builtIn = subtitleTracks
+                .filter {
+                    selectedSubtitleLanguageKey(listOf(it), it.index, null) == language.key
+                }
+                .map { track ->
+                    val optionId = SubtitleSelectionOption.BuiltIn(track).id
                     PlayerControlSubtitleOptionItem(
-                        id = option.id,
+                        id = optionId,
                         languageKey = language.key,
-                        kind = "addon",
-                        index = visibleAddonSubtitles.indexOf(option.subtitle).coerceAtLeast(0),
-                        sourceLabel = option.subtitle.addonName ?: addonLabel,
-                        title = title,
-                        metadata = option.subtitle.display.takeIf {
-                            it.isNotBlank() && it != title
-                        }.orEmpty(),
-                        isSelected = option.id == selectedOptionId,
-                        isAutoSynced = option.id == selectedOptionId && option.subtitle.url == autoSyncedUrl,
+                        kind = "builtIn",
+                        index = track.index,
+                        sourceLabel = builtInLabel,
+                        title = localizedTrackDisplayName(
+                            track.label,
+                            track.language,
+                            track.index,
+                        ),
+                        metadata = forcedLabel.takeIf { track.isForced }.orEmpty(),
+                        isSelected = optionId == selectedOptionId,
                     )
                 }
+            val seenAddonIds = mutableSetOf<String>()
+            val addonItems = addonsByLanguage[language.key].orEmpty().mapNotNull { indexed ->
+                val subtitle = indexed.value
+                val optionId = SubtitleSelectionOption.Addon(subtitle).id
+                if (!seenAddonIds.add(optionId)) return@mapNotNull null
+                val title = languageLabelByKey[language.key] ?: languageLabelForCode(subtitle.language)
+                PlayerControlSubtitleOptionItem(
+                    id = optionId,
+                    languageKey = language.key,
+                    kind = "addon",
+                    index = indexed.index,
+                    sourceLabel = subtitle.addonName ?: addonLabel,
+                    title = title,
+                    metadata = subtitle.display.takeIf {
+                        it.isNotBlank() && it != title
+                    }.orEmpty(),
+                    isSelected = optionId == selectedOptionId,
+                    isAutoSynced = optionId == selectedOptionId && subtitle.url == autoSyncedUrl,
+                )
             }
+            builtIn + addonItems
         }
     }
     return PlayerControlSubtitleSelection(
@@ -2043,7 +2057,7 @@ private fun BoxScope.RenderPlaybackOverlays(
 }
 
 @Composable
-private fun PlayerScreenRuntime.RenderPlayerModals(displayedPositionMs: Long) {
+private fun PlayerScreenRuntime.RenderPlayerModals(displayedPositionMsProvider: () -> Long) {
     val castUrl = if (activeTorrentInfoHash != null) p2pResolvedSourceUrl else activeSourceUrl
     val castTitle = buildString {
         append(title)
@@ -2056,16 +2070,20 @@ private fun PlayerScreenRuntime.RenderPlayerModals(displayedPositionMs: Long) {
     }
     BestCineCastDialog(
         visible = showCastDialog,
-        media = castUrl?.takeIf { it.isNotBlank() }?.let { url ->
-            BestCineCastMedia(
-                title = castTitle.ifBlank { "BestCine" },
-                url = url,
-                headers = activeSourceHeaders,
-                contentType = activeStreamType?.takeIf { it.isNotBlank() } ?: "video/mp4",
-                isLive = false,
-                startPositionMs = displayedPositionMs,
-                durationMs = playbackSnapshot.durationMs,
-            )
+        media = if (showCastDialog) {
+            castUrl?.takeIf { it.isNotBlank() }?.let { url ->
+                BestCineCastMedia(
+                    title = castTitle.ifBlank { "BestCine" },
+                    url = url,
+                    headers = activeSourceHeaders,
+                    contentType = activeStreamType?.takeIf { it.isNotBlank() } ?: "video/mp4",
+                    isLive = false,
+                    startPositionMs = displayedPositionMsProvider(),
+                    durationMs = playbackSnapshot.durationMs,
+                )
+            }
+        } else {
+            null
         },
         onPauseLocalPlayback = {
             shouldPlay = false
@@ -2076,14 +2094,32 @@ private fun PlayerScreenRuntime.RenderPlayerModals(displayedPositionMs: Long) {
     PlayerChaptersPanel(
         visible = showChaptersPanel && chapters.isNotEmpty(),
         chapters = chapters,
-        positionMs = displayedPositionMs,
-        durationMs = playbackSnapshot.durationMs,
+        positionMs = if (showChaptersPanel) displayedPositionMsProvider() else 0L,
+        durationMs = if (showChaptersPanel) playbackSnapshot.durationMs else 0L,
         onChapterSelected = { selectChapter(it) },
         onDismiss = {
             showChaptersPanel = false
             controlsVisible = true
         },
     )
+    val rememberedVisibleAddonSubtitles = remember(
+        addonSubtitles,
+        playerSettingsUiState.subtitleStyle.showOnlyPreferredLanguages,
+        playerSettingsUiState.preferredSubtitleLanguage,
+        playerSettingsUiState.secondaryPreferredSubtitleLanguage,
+        selectedAddonSubtitleId,
+        activeAddonSubtitle,
+    ) {
+        visibleAddonSubtitles
+    }
+    val rememberedSelectedAddonSubtitle = remember(
+        addonSubtitles,
+        rememberedVisibleAddonSubtitles,
+        selectedAddonSubtitleId,
+        activeAddonSubtitle,
+    ) {
+        selectedAddonSubtitle
+    }
     PlayerScreenModalHosts(
         pendingP2pSwitch = pendingP2pSwitch,
         onPendingP2pSwitchChanged = { pendingP2pSwitch = it },
@@ -2129,12 +2165,12 @@ private fun PlayerScreenRuntime.RenderPlayerModals(displayedPositionMs: Long) {
         } else {
             serverSubtitleTracks.firstOrNull { it.isSelected }?.index ?: -1
         },
-        addonSubtitles = visibleAddonSubtitles,
+        addonSubtitles = rememberedVisibleAddonSubtitles,
         selectedAddonSubtitleId = selectedAddonSubtitleId,
         isLoadingAddonSubtitles = isLoadingAddonSubtitles,
         subtitleStyle = subtitleStyle,
         subtitleDelayMs = subtitleDelayMs,
-        selectedAddonSubtitle = selectedAddonSubtitle,
+        selectedAddonSubtitle = rememberedSelectedAddonSubtitle,
         subtitleAutoSyncState = subtitleAutoSyncState,
         onBuiltInSubtitleTrackSelected = { index ->
             if (serverSubtitleTracks.isNotEmpty() && index >= 0) {
@@ -2145,6 +2181,7 @@ private fun PlayerScreenRuntime.RenderPlayerModals(displayedPositionMs: Long) {
                 preferredSubtitleSelectionApplied = true
                 selectedSubtitleIndex = index
                 selectedAddonSubtitleId = null
+                activeAddonSubtitle = null
                 useCustomSubtitles = false
                 persistInternalSubtitlePreference(subtitleTracks.firstOrNull { it.index == index })
                 if (wasCustom) {
@@ -2158,6 +2195,7 @@ private fun PlayerScreenRuntime.RenderPlayerModals(displayedPositionMs: Long) {
         onAddonSubtitleSelected = { addon ->
             isUserExplicitSubtitleSelection = true
             selectedAddonSubtitleId = addon.selectionKey
+            activeAddonSubtitle = addon
             selectedSubtitleIndex = -1
             useCustomSubtitles = true
             preferredSubtitleSelectionApplied = true
@@ -2266,7 +2304,7 @@ private fun PlayerScreenRuntime.RenderPlayerModals(displayedPositionMs: Long) {
         showSubmitIntroModal = showSubmitIntroModal,
         activeVideoId = activeVideoId,
         metaUiState = metaUiState,
-        displayedPositionMs = displayedPositionMs,
+        displayedPositionMsProvider = displayedPositionMsProvider,
         submitIntroSegmentType = submitIntroSegmentType,
         onSubmitIntroSegmentTypeChanged = { submitIntroSegmentType = it },
         submitIntroStartTimeStr = submitIntroStartTimeStr,

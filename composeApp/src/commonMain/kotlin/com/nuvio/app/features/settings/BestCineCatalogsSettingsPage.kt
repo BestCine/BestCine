@@ -164,115 +164,43 @@ internal fun BestCineCatalogsSidebarItem(
 }
 
 /**
- * Cartão destacado na raiz das Configurações (Mobile) para levar direto aos Catálogos BestCine.
+ * Cartão na raiz das Configurações (Mobile) padronizado no mesmo visual discreto dos demais itens
+ * e do menu lateral do PC (sem brilho de selecionado/clicado).
  */
 @Composable
 internal fun BestCineCatalogsFeaturedRootCard(
     onClick: () -> Unit,
 ) {
-    val shape = RoundedCornerShape(18.dp)
-    Surface(
-        onClick = onClick,
-        shape = shape,
-        color = Color.Transparent,
-        border = BorderStroke(
-            width = 1.2.dp,
-            brush = Brush.linearGradient(
-                colors = listOf(
-                    BestCineBranding.PrimaryBlueBright.copy(alpha = 0.80f),
-                    BestCineBranding.PrimaryBlue.copy(alpha = 0.35f),
-                ),
-            ),
-        ),
-        modifier = Modifier.fillMaxWidth(),
-    ) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .background(
-                    Brush.horizontalGradient(
-                        colors = listOf(
-                            BestCineBranding.PrimaryBlue.copy(alpha = 0.28f),
-                            Color(0xFF0E182E),
-                        ),
-                    ),
-                )
-                .padding(horizontal = 16.dp, vertical = 14.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(12.dp),
-        ) {
-            Box(
-                modifier = Modifier
-                    .size(42.dp)
-                    .clip(RoundedCornerShape(12.dp))
-                    .background(
-                        Brush.linearGradient(
-                            colors = listOf(
-                                BestCineBranding.PrimaryBlueBright,
-                                BestCineBranding.PrimaryBlue,
-                            ),
-                        ),
-                    ),
-                contentAlignment = Alignment.Center,
-            ) {
-                Icon(
-                    imageVector = Icons.Rounded.AutoAwesome,
-                    contentDescription = null,
-                    tint = Color.White,
-                    modifier = Modifier.size(22.dp),
-                )
-            }
-
-            Column(
-                modifier = Modifier.weight(1f),
-                verticalArrangement = Arrangement.spacedBy(3.dp),
-            ) {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+    val tokens = MaterialTheme.nuvio
+    SettingsGroup(isTablet = false) {
+        SettingsNavigationRow(
+            title = "Catálogos",
+            description = "Exclusivo BestCine • Lançamentos, Sessão do Momento, Sazonal e Streamings",
+            icon = Icons.Rounded.AutoAwesome,
+            isTablet = false,
+            trailingContent = {
+                Box(
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(6.dp))
+                        .background(Color.White.copy(alpha = 0.06f))
+                        .border(
+                            width = 1.dp,
+                            color = Color.White.copy(alpha = 0.12f),
+                            shape = RoundedCornerShape(6.dp),
+                        )
+                        .padding(horizontal = 6.dp, vertical = 2.dp),
                 ) {
                     Text(
-                        text = "Catálogos",
-                        style = MaterialTheme.typography.titleSmall,
-                        color = Color.White,
+                        text = "BC",
+                        fontSize = 9.sp,
                         fontWeight = FontWeight.Bold,
+                        letterSpacing = 0.5.sp,
+                        color = tokens.colors.textMuted,
                     )
-                    Box(
-                        modifier = Modifier
-                            .clip(RoundedCornerShape(6.dp))
-                            .background(BestCineBranding.PrimaryBlue.copy(alpha = 0.42f))
-                            .border(
-                                1.dp,
-                                BestCineBranding.PrimaryBlueBright.copy(alpha = 0.65f),
-                                RoundedCornerShape(6.dp),
-                            )
-                            .padding(horizontal = 7.dp, vertical = 2.dp),
-                    ) {
-                        Text(
-                            text = "BESTCINE",
-                            fontSize = 9.sp,
-                            fontWeight = FontWeight.ExtraBold,
-                            letterSpacing = 0.7.sp,
-                            color = Color(0xFFDBEAFE),
-                        )
-                    }
                 }
-                Text(
-                    text = "Lançamentos, Sessão do Momento, Sazonal, por Duração e Streamings (Brasil)",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = Color(0xFFBFDBFE),
-                    maxLines = 2,
-                    overflow = TextOverflow.Ellipsis,
-                )
-            }
-
-            Icon(
-                imageVector = Icons.AutoMirrored.Rounded.KeyboardArrowRight,
-                contentDescription = null,
-                tint = Color(0xFF93C5FD),
-                modifier = Modifier.size(22.dp),
-            )
-        }
+            },
+            onClick = onClick,
+        )
     }
 }
 
@@ -387,6 +315,7 @@ internal fun LazyListScope.bestCineCatalogsSettingsContent(
         ) {
             BestCineStreamingCatalogsSectionCard(
                 isTablet = isTablet,
+                showBestCineDefaultCatalogs = settingsUiState.showBestCineDefaultCatalogs,
                 config = settingsUiState.streamingCatalogConfig,
             )
         }

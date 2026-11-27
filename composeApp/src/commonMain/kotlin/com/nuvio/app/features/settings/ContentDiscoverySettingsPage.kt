@@ -28,6 +28,21 @@ internal fun LazyListScope.contentDiscoveryContent(
     onMediaServersClick: () -> Unit,
 ) {
     item {
+        SettingsSection(
+            title = stringResource(Res.string.settings_content_discovery_section_sources),
+            isTablet = isTablet,
+        ) {
+            SettingsGroup(isTablet = isTablet) {
+                SettingsNavigationRow(
+                    title = stringResource(Res.string.compose_settings_page_addons),
+                    description = "Instale addons externos de catálogos, legendas e metadados (streams externos bloqueados)",
+                    isTablet = isTablet,
+                    onClick = onAddonsClick,
+                )
+            }
+        }
+    }
+    item {
         val recentSearchesEnabled by remember {
             SearchHistoryRepository.ensureLoaded()
             SearchHistoryRepository.enabled

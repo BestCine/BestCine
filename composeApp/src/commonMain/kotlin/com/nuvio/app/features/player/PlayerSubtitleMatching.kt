@@ -215,16 +215,23 @@ internal object SubtitleLanguageMatching {
         "zu" to "zulu",
     )
 
+    private val WHITESPACE_REGEX = Regex("\\s+")
+
     fun normalizeLanguageCode(lang: String): String {
         val code = lang.trim().lowercase()
         if (code.isBlank()) return ""
+
+        LANGUAGE_OVERRIDES[code]?.let { return it }
+        if (code.length <= 3 && code.all { it in 'a'..'z' }) {
+            return code
+        }
 
         val normalizedCode = code.replace('_', '-')
         val tokenized = normalizedCode
             .replace('-', ' ')
             .replace('.', ' ')
             .replace('/', ' ')
-            .replace(Regex("\\s+"), " ")
+            .replace(WHITESPACE_REGEX, " ")
             .trim()
 
         fun containsAny(vararg values: String): Boolean = values.any { value ->

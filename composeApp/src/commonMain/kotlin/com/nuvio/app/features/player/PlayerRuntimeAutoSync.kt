@@ -27,6 +27,7 @@ internal fun PlayerScreenRuntime.configureAutoSyncController(
     controller.setAutoSyncAppliedListener { subtitleUrl, delayMs ->
         val appliedSubtitle = addonSubtitles.firstOrNull { it.url == subtitleUrl }
         selectedAddonSubtitleId = appliedSubtitle?.selectionKey ?: subtitleUrl
+        activeAddonSubtitle = appliedSubtitle ?: activeAddonSubtitle?.copy(url = subtitleUrl)
         selectedSubtitleIndex = -1
         useCustomSubtitles = true
         preferredSubtitleSelectionApplied = true

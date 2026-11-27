@@ -1,6 +1,7 @@
 package com.nuvio.app.features.streams
 
 import co.touchlab.kermit.Logger
+import com.nuvio.app.bestcine.BestCineAnimeIdResolver
 import com.nuvio.app.features.addons.buildAddonResourceUrl
 import com.nuvio.app.features.addons.fetchAddonResponseText
 import com.nuvio.app.features.debrid.LocalDebridAvailabilityService
@@ -234,9 +235,25 @@ private fun CoroutineScope.launchStreamSearchTasks(
     val log = Logger.withTag("StreamSearch")
     targets.streamAddons.forEach { addon ->
         launch {
+            val isOfficialBestCine = addon.manifest.transportUrl.contains("/bc_")
+            val effectiveType = if (isOfficialBestCine && targets.type.equals("anime", ignoreCase = true)) {
+                if (targets.episode != null || targets.videoId.count { it == ':' } >= 2) "series" else "movie"
+            } else {
+                targets.type
+            }
+            val effectiveVideoId = if (isOfficialBestCine && BestCineAnimeIdResolver.isAnimeMetaId(targets.videoId)) {
+                BestCineAnimeIdResolver.resolveStreamVideoIdToImdb(
+                    videoId = targets.videoId,
+                    type = effectiveType,
+                    season = targets.season,
+                    episode = targets.episode,
+                ) ?: targets.videoId
+            } else {
+                targets.videoId
+            }
             val resourceName = if (
-                addon.manifest.transportUrl.contains("/bc_") &&
-                (targets.type == "movie" || targets.type == "series")
+                isOfficialBestCine &&
+                (effectiveType == "movie" || effectiveType == "series")
             ) {
                 "bestcine-vod/stream"
             } else {
@@ -245,8 +262,8 @@ private fun CoroutineScope.launchStreamSearchTasks(
             val url = buildAddonResourceUrl(
                 manifestUrl = addon.manifest.transportUrl,
                 resource = resourceName,
-                type = targets.type,
-                id = targets.videoId,
+                type = effectiveType,
+                id = effectiveVideoId,
             )
             log.d { "Fetching streams from: $url" }
             val group = runCatchingUnlessCancelled {

@@ -4,6 +4,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.nuvio.app.bestcine.BestCineAnimeIdResolver
 import com.nuvio.app.core.build.AppFeaturePolicy
 import com.nuvio.app.features.addons.AddonManifest
 import com.nuvio.app.features.addons.AddonRepository
@@ -16,15 +17,26 @@ import com.nuvio.app.features.plugins.PluginsUiState
 import com.nuvio.app.features.servers.ServerRepository
 import com.nuvio.app.features.servers.ServerStreams
 
-internal fun AddonManifest.supportsStream(type: String, videoId: String): Boolean =
-    supportsResource("stream", type, videoId)
+internal fun AddonManifest.supportsStream(type: String, videoId: String): Boolean {
+    if (supportsResource("stream", type, videoId)) return true
+    // Addons externos de anime (kitsu:/mal:/anilist:/type=anime) são traduzidos para IMDb (tt...)
+    // via ARM antes de consultar o BestCine.
+    if (BestCineAnimeIdResolver.isAnimeMetaId(videoId) || type.equals("anime", ignoreCase = true)) {
+        val effectiveType = if (type.equals("anime", ignoreCase = true)) "series" else type
+        return supportsResource("stream", effectiveType, "tt0000000")
+    }
+    return false
+}
+
+internal fun ManagedAddon.isAllowedStreamProvider(): Boolean =
+    enabled && AddonRepository.isBestCineOfficialAddonUrl(manifestUrl)
 
 internal fun hasCompatiblePlaybackSource(
     addons: List<ManagedAddon>,
     plugins: PluginsUiState,
     type: String,
     videoId: String,
-): Boolean = addons.any { it.enabled && it.manifest?.supportsStream(type, videoId) == true } ||
+): Boolean = addons.any { it.isAllowedStreamProvider() && it.manifest?.supportsStream(type, videoId) == true } ||
     (plugins.pluginsEnabled && plugins.scrapers.any { it.enabled && it.supportsType(type) })
 
 internal class PlaybackAvailability(

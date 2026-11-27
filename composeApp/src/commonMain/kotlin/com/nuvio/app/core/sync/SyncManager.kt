@@ -282,10 +282,13 @@ object SyncManager {
     private var fullPullFreshness = ProfilePullFreshness()
 
     private val profileSyncOperations = ProfileSyncOperations(
+        // BestCine: Conta Nuvio em Rastreamento sincroniza Continuar assistindo, Assistidos,
+        // Biblioteca e addons externos EXCLUSIVAMENTE de catálogo (streams bloqueados em 2 camadas).
+        // Plugins, coleções e configurações de perfil/catálogo continuam locais.
         pullAddons = { profileId -> AddonRepository.pullFromServer(profileId) },
-        pullPlugins = { profileId -> PluginRepository.pullFromServer(profileId) },
-        pullProfileSettings = { profileId -> ProfileSettingsSync.pull(profileId) },
-        syncProviderCredentials = { profileId -> ProviderCredentialSync.syncFromRemote(profileId) },
+        pullPlugins = { _ -> Unit },
+        pullProfileSettings = { _ -> Unit },
+        syncProviderCredentials = { _ -> Unit },
         pullLibrary = { profileId -> LibraryRepository.pullFromServer(profileId) },
         refreshActiveWatchSource = { profileId ->
             val result = WatchProgressSourceCoordinator.refreshActiveSource(profileId = profileId, force = true)
@@ -294,9 +297,9 @@ object SyncManager {
                     "progress=${result.progressRefreshed} watched=${result.watchedHistoryRefreshed}"
             }
         },
-        pullCollections = { profileId -> CollectionSyncService.pullFromServer(profileId) },
-        pullHomeCatalogSettings = { profileId -> HomeCatalogSettingsSyncService.pullFromServer(profileId) },
-        syncMediaServers = { profileId -> MediaServerSync.syncFromRemote(profileId) },
+        pullCollections = { _ -> Unit },
+        pullHomeCatalogSettings = { _ -> Unit },
+        syncMediaServers = { _ -> Unit },
     )
     private val profileActivitySyncOperations = ProfileActivitySyncOperations(
         pullLibrary = { profileId -> LibraryRepository.pullFromServer(profileId) },

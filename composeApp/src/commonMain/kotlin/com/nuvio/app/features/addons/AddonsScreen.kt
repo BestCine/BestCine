@@ -151,19 +151,26 @@ internal fun AddonsSettingsPageContent(
             EmptyStateCard(usePersonalMediaCopy = usePersonalMediaCopy)
         } else {
             val lastIndex = uiState.addons.lastIndex
+            val minMovableIndex = if (uiState.addons.firstOrNull()?.let { AddonRepository.isBestCineOfficialAddonUrl(it.manifestUrl) } == true) {
+                1
+            } else {
+                0
+            }
             uiState.addons.forEachIndexed { index, addon ->
+                val isOfficialBestCine = AddonRepository.isBestCineOfficialAddonUrl(addon.manifestUrl)
                 val manifest = addon.manifest
                 val behaviorHints = manifest?.behaviorHints
-                val showConfigureAction = behaviorHints?.configurable == true || behaviorHints?.configurationRequired == true
+                val showConfigureAction = !isOfficialBestCine && (behaviorHints?.configurable == true || behaviorHints?.configurationRequired == true)
                 val configureUrl = addon.manifestUrl.toConfigureUrl()
                 InstalledAddonCard(
                     addon = addon,
-                    onMoveUpClick = if (index > 0) {
+                    isOfficialBestCine = isOfficialBestCine,
+                    onMoveUpClick = if (!isOfficialBestCine && index > minMovableIndex) {
                         { AddonRepository.moveAddon(index, index - 1) }
                     } else {
                         null
                     },
-                    onMoveDownClick = if (index < lastIndex) {
+                    onMoveDownClick = if (!isOfficialBestCine && index < lastIndex) {
                         { AddonRepository.moveAddon(index, index + 1) }
                     } else {
                         null
@@ -175,7 +182,9 @@ internal fun AddonsSettingsPageContent(
                         )
                     },
                     onEnabledChange = { enabled ->
-                        AddonRepository.setAddonEnabled(addon.manifestUrl, enabled)
+                        if (!isOfficialBestCine) {
+                            AddonRepository.setAddonEnabled(addon.manifestUrl, enabled)
+                        }
                     },
                     onConfigureClick = if (showConfigureAction && !configureUrl.isNullOrBlank()) {
                         {
@@ -186,7 +195,11 @@ internal fun AddonsSettingsPageContent(
                     } else {
                         null
                     },
-                    onDeleteClick = { addonPendingDeletionUrl = addon.manifestUrl },
+                    onDeleteClick = if (!isOfficialBestCine) {
+                        { addonPendingDeletionUrl = addon.manifestUrl }
+                    } else {
+                        null
+                    },
                 )
             }
         }
@@ -366,14 +379,12 @@ private fun AddAddonCard(
             enabled = addonUrl.isNotBlank(),
             onClick = onAddClick,
         )
-        if (usePersonalMediaCopy) {
-            Spacer(modifier = Modifier.height(14.dp))
-            Text(
-                text = stringResource(Res.string.addons_appstore_add_description),
-                style = MaterialTheme.typography.bodyLarge,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-        }
+        Spacer(modifier = Modifier.height(14.dp))
+        Text(
+            text = "Você pode instalar addons externos de catálogo, legendas ou metadados (ex.: TMDB, Trakt, MDBList, Letterboxd, OpenSubtitles, SubDL). Addons com streams externos são bloqueados automaticamente. Com a Conta Nuvio conectada, seus addons sincronizam com o BestCine TV.",
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
         formMessage?.let { message ->
             Spacer(modifier = Modifier.height(14.dp))
             Text(
@@ -439,12 +450,13 @@ private fun EmptyStateCard(
 @Composable
 private fun InstalledAddonCard(
     addon: ManagedAddon,
+    isOfficialBestCine: Boolean,
     onMoveUpClick: (() -> Unit)?,
     onMoveDownClick: (() -> Unit)?,
     onRefreshClick: () -> Unit,
     onEnabledChange: (Boolean) -> Unit,
     onConfigureClick: (() -> Unit)?,
-    onDeleteClick: () -> Unit,
+    onDeleteClick: (() -> Unit)?,
 ) {
     val manifest = addon.manifest
 
@@ -477,16 +489,20 @@ private fun InstalledAddonCard(
                 }
             }
             Spacer(modifier = Modifier.width(12.dp))
-            Switch(
-                checked = addon.enabled,
-                onCheckedChange = onEnabledChange,
-                colors = SwitchDefaults.colors(
-                    checkedThumbColor = MaterialTheme.colorScheme.onPrimary,
-                    checkedTrackColor = MaterialTheme.colorScheme.primary,
-                    uncheckedThumbColor = MaterialTheme.colorScheme.onSurfaceVariant,
-                    uncheckedTrackColor = MaterialTheme.colorScheme.outlineVariant,
-                ),
-            )
+            if (isOfficialBestCine) {
+                NuvioInfoBadge(text = "Sempre ativo")
+            } else {
+                Switch(
+                    checked = addon.enabled,
+                    onCheckedChange = onEnabledChange,
+                    colors = SwitchDefaults.colors(
+                        checkedThumbColor = MaterialTheme.colorScheme.onPrimary,
+                        checkedTrackColor = MaterialTheme.colorScheme.primary,
+                        uncheckedThumbColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                        uncheckedTrackColor = MaterialTheme.colorScheme.outlineVariant,
+                    ),
+                )
+            }
         }
 
         Spacer(modifier = Modifier.height(12.dp))
@@ -526,12 +542,14 @@ private fun InstalledAddonCard(
                     onClick = onConfigure,
                 )
             }
-            NuvioIconActionButton(
-                icon = Icons.Rounded.Delete,
-                contentDescription = stringResource(Res.string.addons_delete),
-                tint = MaterialTheme.colorScheme.error,
-                onClick = onDeleteClick,
-            )
+            onDeleteClick?.let { onDelete ->
+                NuvioIconActionButton(
+                    icon = Icons.Rounded.Delete,
+                    contentDescription = stringResource(Res.string.addons_delete),
+                    tint = MaterialTheme.colorScheme.error,
+                    onClick = onDelete,
+                )
+            }
         }
 
         Spacer(modifier = Modifier.height(12.dp))
@@ -543,6 +561,17 @@ private fun InstalledAddonCard(
             horizontalArrangement = Arrangement.spacedBy(10.dp),
             verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {
+            NuvioInfoBadge(
+                text = when {
+                    isOfficialBestCine -> "Oficial BestCine"
+                    manifest != null && manifest.resources.any {
+                        it.name.equals("subtitles", ignoreCase = true) ||
+                            it.name.equals("subtitle", ignoreCase = true)
+                    } && manifest.catalogs.isEmpty() -> "Legendas"
+                    manifest != null && manifest.catalogs.isNotEmpty() -> "Catálogo"
+                    else -> "Externo (sem stream)"
+                },
+            )
             NuvioInfoBadge(
                 text = when {
                     !addon.enabled -> stringResource(Res.string.addons_badge_disabled)
@@ -596,6 +625,15 @@ private fun InstalledAddonCard(
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
+
+                if (isOfficialBestCine) {
+                    Spacer(modifier = Modifier.height(10.dp))
+                    Text(
+                        text = "Mantido ativo para streams e TV ao Vivo. Para ocultar os catálogos padrão do BestCine da Tela Inicial, acesse Configurações → Tela Inicial.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
 
                 addon.errorMessage?.let { staleError ->
                     Spacer(modifier = Modifier.height(14.dp))

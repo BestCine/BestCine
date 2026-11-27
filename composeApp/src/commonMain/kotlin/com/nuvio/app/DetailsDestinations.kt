@@ -7,6 +7,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Modifier
+import com.nuvio.app.bestcine.BestCineAnimeIdResolver
 import com.nuvio.app.features.details.MetaDetailsScreen
 import com.nuvio.app.features.details.PersonDetailScreen
 import com.nuvio.app.features.details.TmdbEntityBrowseScreen
@@ -46,19 +47,33 @@ internal fun rememberOpenMeta(navController: NuvioNavigator): (MetaPreview) -> U
     val scope = rememberCoroutineScope()
     return { preview ->
         scope.launch {
-            val resolvedId = if (preview.id.startsWith("tmdb:")) {
-                val tmdbId = preview.id.removePrefix("tmdb:").toIntOrNull()
-                val resolved = tmdbId?.let {
-                    TmdbService.tmdbToImdb(
-                        tmdbId = it,
-                        mediaType = preview.type,
-                    )
-                } ?: preview.id
-                resolved
+            val animeResolved = if (BestCineAnimeIdResolver.isAnimeMetaId(preview.id)) {
+                BestCineAnimeIdResolver.resolveMetaTarget(preview.id)
             } else {
-                preview.id
+                null
             }
-            navController.openPreview(preview.copy(id = resolvedId))
+            val resolvedId = when {
+                preview.id.startsWith("tmdb:") -> {
+                    val tmdbId = preview.id.removePrefix("tmdb:").toIntOrNull()
+                    tmdbId?.let {
+                        TmdbService.tmdbToImdb(
+                            tmdbId = it,
+                            mediaType = preview.type,
+                        )
+                    } ?: preview.id
+                }
+                animeResolved != null -> animeResolved.imdbId
+                else -> preview.id
+            }
+            val resolvedType = if (
+                preview.type.equals("anime", ignoreCase = true) &&
+                resolvedId.startsWith("tt")
+            ) {
+                if (animeResolved?.isMovie == true) "movie" else "series"
+            } else {
+                preview.type
+            }
+            navController.openPreview(preview.copy(id = resolvedId, type = resolvedType))
         }
     }
 }

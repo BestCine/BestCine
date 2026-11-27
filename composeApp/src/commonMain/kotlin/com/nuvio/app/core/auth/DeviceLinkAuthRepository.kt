@@ -176,6 +176,7 @@ object DeviceLinkAuthRepository {
             val result = json.decodeFromString<DeviceLinkExchangeResponse>(response.bodyAsText())
             val user = result.user ?: SupabaseProvider.client.auth.retrieveUser(result.accessToken)
             val expiresIn = requireNotNull(result.expiresIn?.takeIf { it > 0L })
+            AuthRepository.prepareForNuvioTrackingSignIn()
             SupabaseProvider.client.auth.importSession(
                 UserSession(
                     accessToken = result.accessToken,
@@ -186,8 +187,10 @@ object DeviceLinkAuthRepository {
                 ),
             )
         } catch (error: CancellationException) {
+            AuthRepository.restoreAnonymousIfNotAuthenticated()
             throw error
         } catch (error: Throwable) {
+            AuthRepository.restoreAnonymousIfNotAuthenticated()
             throw DeviceLinkAuthException(DeviceLinkAuthFailure.Complete, error)
         }
     }

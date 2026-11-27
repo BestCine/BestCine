@@ -97,14 +97,27 @@ object HomeRepository {
             val loadedSections = linkedMapOf<String, HomeCatalogSection>().apply {
                 putAll(cachedSections)
             }
-            val heroSourceKeys = prioritizedRequests
+            val explicitHeroKeys = prioritizedRequests
                 .filter { definition ->
                     !definition.type.equals("tv", ignoreCase = true) &&
                         !definition.type.equals("channel", ignoreCase = true) &&
                         settingsSnapshot.heroEnabled &&
+                        settingsSnapshot.preferences[definition.key]?.enabled != false &&
                         settingsSnapshot.preferences[definition.key]?.heroSourceEnabled != false
                 }
                 .mapTo(mutableSetOf(), HomeCatalogDefinition::cacheKey)
+            val heroSourceKeys = if (explicitHeroKeys.isNotEmpty() || !settingsSnapshot.heroEnabled) {
+                explicitHeroKeys
+            } else {
+                prioritizedRequests
+                    .filter { definition ->
+                        !definition.type.equals("tv", ignoreCase = true) &&
+                            !definition.type.equals("channel", ignoreCase = true) &&
+                            settingsSnapshot.preferences[definition.key]?.enabled != false
+                    }
+                    .take(HomeCatalogSettingsRepository.HERO_SOURCE_SELECTION_LIMIT)
+                    .mapTo(mutableSetOf(), HomeCatalogDefinition::cacheKey)
+            }
             val attemptedKeys = mutableSetOf<String>()
             var heroSourcesPublished = false
             var firstErrorMessage: String? = null
@@ -242,12 +255,20 @@ object HomeRepository {
 
         val catalogHeroItems = if (snapshot.heroEnabled) {
             val heroRandom = Random((requestKey?.hashCode() ?: 0).absoluteValue + 1)
-            currentDefinitions
-                .filter { definition ->
+            val explicitHeroDefs = currentDefinitions.filter { definition ->
+                !definition.type.equals("tv", ignoreCase = true) &&
+                    !definition.type.equals("channel", ignoreCase = true) &&
+                    preferences[definition.key]?.enabled != false &&
+                    preferences[definition.key]?.heroSourceEnabled != false
+            }
+            val candidateDefs = explicitHeroDefs.ifEmpty {
+                currentDefinitions.filter { definition ->
                     !definition.type.equals("tv", ignoreCase = true) &&
                         !definition.type.equals("channel", ignoreCase = true) &&
-                        preferences[definition.key]?.heroSourceEnabled != false
-                }
+                        preferences[definition.key]?.enabled != false
+                }.take(HomeCatalogSettingsRepository.HERO_SOURCE_SELECTION_LIMIT)
+            }
+            candidateDefs
                 .mapNotNull { definition -> cachedSections[definition.cacheKey] }
                 .map { section -> section.withPosterOverlay().withReleaseFilter() }
                 .flatMap { section -> section.items }

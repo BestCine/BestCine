@@ -2753,6 +2753,11 @@ private fun BestCineTvMobileFullscreenOverlay(
     Box(
         modifier = Modifier
             .fillMaxSize()
+            .pointerInput(Unit) {
+                detectTapGestures(
+                    onTap = { onToggleControlsState.value() },
+                )
+            }
             .pointerInput(gestureController, sideGestureSystemEdgeExclusionPx) {
                 val controller = gestureController ?: return@pointerInput
                 awaitEachGesture {
@@ -2797,7 +2802,7 @@ private fun BestCineTvMobileFullscreenOverlay(
                     while (true) {
                         val event = awaitPointerEvent()
                         val change = event.changes.firstOrNull { it.id == down.id } ?: break
-                        if (!change.pressed || change.isConsumed) break
+                        if (!change.pressed) break
 
                         val delta = change.position - change.previousPosition
                         totalDx += delta.x
@@ -2835,11 +2840,6 @@ private fun BestCineTvMobileFullscreenOverlay(
                         change.consume()
                     }
                 }
-            }
-            .pointerInput(Unit) {
-                detectTapGestures(
-                    onTap = { onToggleControlsState.value() },
-                )
             },
     ) {
         AnimatedVisibility(

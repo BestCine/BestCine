@@ -82,6 +82,7 @@ internal fun PlayerScreenRuntime.selectServerSubtitleTrack(index: Int) {
     preferredSubtitleSelectionApplied = true
     selectedSubtitleIndex = -1
     selectedAddonSubtitleId = null
+    activeAddonSubtitle = null
     if (useCustomSubtitles) {
         playerController?.clearExternalSubtitleAndSelect(-1)
     } else {

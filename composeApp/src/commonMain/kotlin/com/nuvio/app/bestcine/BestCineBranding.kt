@@ -8,7 +8,19 @@ import androidx.compose.ui.graphics.Color
  */
 object BestCineBranding {
     const val APP_NAME = "BestCine"
-    const val PRODUCTION_BASE_URL = "https://example.invalid"
+
+    /**
+     * URL base do servidor injetada exclusivamente em tempo de build via local.properties / GitHub Secrets
+     * (`BESTCINE_SERVER_URL`), mantendo o código-fonte público livre de endereços fixos.
+     */
+    val PRODUCTION_BASE_URL: String
+        get() = BestCineClientConfig.SERVER_BASE_URL.trim().trimEnd('/')
+
+    val PRODUCTION_HOST: String
+        get() = PRODUCTION_BASE_URL
+            .removePrefix("https://")
+            .removePrefix("http://")
+            .substringBefore("/")
 
     /**
      * Repositório GitHub padrão usado pelo sistema de atualização automática (GitHub Releases).

@@ -187,6 +187,7 @@ private fun PlayerScreenRuntime.resetTrackSelectionState() {
     subtitleTracks = emptyList()
     selectedSubtitleIndex = -1
     selectedAddonSubtitleId = null
+    activeAddonSubtitle = null
     useCustomSubtitles = false
 }
 

@@ -6,4 +6,7 @@ internal expect object AuthStorage {
     fun clearAnonymousUserId()
     fun loadFlag(key: String): Boolean
     fun saveFlag(key: String, value: Boolean)
+    fun loadSupabaseSessionJson(): String?
+    fun saveSupabaseSessionJson(sessionJson: String)
+    fun clearSupabaseSessionJson()
 }

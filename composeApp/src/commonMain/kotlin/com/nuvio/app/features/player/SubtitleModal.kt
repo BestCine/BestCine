@@ -87,19 +87,25 @@ fun SubtitleModal(
     modifier: Modifier = Modifier,
 ) {
     val effectiveSelectedAddonSubtitle = selectedAddonSubtitle
-        ?: addonSubtitles.findSelectedAddon(selectedAddonSubtitleId)
-    val playbackLanguageKey = selectedSubtitleLanguageKey(
-        subtitleTracks = subtitleTracks,
-        selectedSubtitleIndex = selectedSubtitleIndex,
-        selectedAddonSubtitle = effectiveSelectedAddonSubtitle,
-    )
-    val playbackOptionId = selectedSubtitleOptionId(
-        subtitleTracks = subtitleTracks,
-        selectedSubtitleIndex = selectedSubtitleIndex,
-        selectedAddonSubtitle = effectiveSelectedAddonSubtitle,
-    )
-    val subtitleStructureKey = subtitleTracksStructureKey(subtitleTracks)
-    val addonStructureKey = addonSubtitlesStructureKey(addonSubtitles)
+        ?: remember(addonSubtitles, selectedAddonSubtitleId) {
+            addonSubtitles.findSelectedAddon(selectedAddonSubtitleId)
+        }
+    val playbackLanguageKey = remember(subtitleTracks, selectedSubtitleIndex, effectiveSelectedAddonSubtitle) {
+        selectedSubtitleLanguageKey(
+            subtitleTracks = subtitleTracks,
+            selectedSubtitleIndex = selectedSubtitleIndex,
+            selectedAddonSubtitle = effectiveSelectedAddonSubtitle,
+        )
+    }
+    val playbackOptionId = remember(subtitleTracks, selectedSubtitleIndex, effectiveSelectedAddonSubtitle) {
+        selectedSubtitleOptionId(
+            subtitleTracks = subtitleTracks,
+            selectedSubtitleIndex = selectedSubtitleIndex,
+            selectedAddonSubtitle = effectiveSelectedAddonSubtitle,
+        )
+    }
+    val subtitleStructureKey = remember(subtitleTracks) { subtitleTracksStructureKey(subtitleTracks) }
+    val addonStructureKey = remember(addonSubtitles) { addonSubtitlesStructureKey(addonSubtitles) }
     val languageItems = remember(
         subtitleStructureKey,
         addonStructureKey,
@@ -125,6 +131,7 @@ fun SubtitleModal(
         )
     }
     var pendingOptionId by remember(visible) { mutableStateOf<String?>(playbackOptionId) }
+    var autoFocusLoadedLanguage by remember(visible) { mutableStateOf(false) }
     val options = remember(activeLanguageKey, subtitleStructureKey, addonStructureKey) {
         buildSubtitleSelectionOptions(activeLanguageKey, subtitleTracks, addonSubtitles)
     }
@@ -148,11 +155,15 @@ fun SubtitleModal(
         }
     }
 
-    LaunchedEffect(languageItems) {
+    LaunchedEffect(languageItems, autoFocusLoadedLanguage) {
         if (languageItems.none { it.key == activeLanguageKey }) {
             activeLanguageKey = playbackLanguageKey.takeIf { key -> languageItems.any { it.key == key } }
                 ?: languageItems.firstOrNull { it.key != SubtitleOffLanguageKey }?.key
                 ?: SubtitleOffLanguageKey
+        } else if (autoFocusLoadedLanguage && activeLanguageKey == SubtitleOffLanguageKey && languageItems.size > 1) {
+            activeLanguageKey = languageItems.firstOrNull { it.key != SubtitleOffLanguageKey }?.key
+                ?: SubtitleOffLanguageKey
+            autoFocusLoadedLanguage = false
         }
     }
 
@@ -167,10 +178,27 @@ fun SubtitleModal(
         visible = visible,
         onDismiss = onDismiss,
         modifier = modifier,
-        contentPadding = PaddingValues(start = 52.dp, end = 52.dp, top = 36.dp, bottom = 76.dp),
+        contentPadding = PaddingValues(start = 24.dp, end = 24.dp, top = 28.dp, bottom = 56.dp),
     ) {
         BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
             val railMaxHeight = (maxHeight - 72.dp).coerceAtLeast(120.dp)
+            val isCompactWidth = maxWidth < 808.dp
+            val railGap = if (isCompactWidth) 10.dp else 14.dp
+            val languageRailWidth = if (isCompactWidth) {
+                (maxWidth * 0.25f).coerceIn(132.dp, 200.dp)
+            } else {
+                200.dp
+            }
+            val optionsRailWidth = if (isCompactWidth) {
+                (maxWidth * 0.39f).coerceIn(190.dp, 300.dp)
+            } else {
+                300.dp
+            }
+            val styleRailWidth = if (isCompactWidth) {
+                (maxWidth * 0.33f).coerceIn(180.dp, 280.dp)
+            } else {
+                280.dp
+            }
 
             Column(
                 modifier = Modifier.align(Alignment.BottomStart),
@@ -184,12 +212,12 @@ fun SubtitleModal(
                 )
 
                 Row(
-                    horizontalArrangement = Arrangement.spacedBy(14.dp),
+                    horizontalArrangement = Arrangement.spacedBy(railGap),
                     verticalAlignment = Alignment.Top,
                 ) {
                     SubtitleRail(
                         title = stringResource(Res.string.compose_player_languages),
-                        width = 200.dp,
+                        width = languageRailWidth,
                     ) {
                         LazyColumn(
                             state = languageListState,
@@ -202,17 +230,20 @@ fun SubtitleModal(
                                     item = item,
                                     selected = item.key == activeLanguageKey,
                                     onClick = {
+                                        autoFocusLoadedLanguage = false
                                         activeLanguageKey = item.key
-                                        val availableOptions = buildSubtitleSelectionOptions(
-                                            item.key,
-                                            subtitleTracks,
-                                            addonSubtitles,
-                                        )
-                                        pendingOptionId = playbackOptionId?.takeIf { id ->
-                                            availableOptions.any { it.id == id }
-                                        }
                                         if (item.key == SubtitleOffLanguageKey) {
+                                            pendingOptionId = null
                                             onBuiltInTrackSelected(-1)
+                                        } else {
+                                            val availableOptions = buildSubtitleSelectionOptions(
+                                                item.key,
+                                                subtitleTracks,
+                                                addonSubtitles,
+                                            )
+                                            pendingOptionId = playbackOptionId?.takeIf { id ->
+                                                availableOptions.any { it.id == id }
+                                            }
                                         }
                                     },
                                 )
@@ -222,7 +253,7 @@ fun SubtitleModal(
 
                     SubtitleRail(
                         title = stringResource(Res.string.compose_player_subtitles),
-                        width = 300.dp,
+                        width = optionsRailWidth,
                     ) {
                         when {
                             options.isEmpty() -> {
@@ -246,7 +277,10 @@ fun SubtitleModal(
                                     SubtitleOptionsRailEmptyContent.FETCH -> {
                                         SubtitleRailEmptyState(
                                             text = stringResource(Res.string.compose_player_fetch_subtitles),
-                                            onClick = onFetchAddonSubtitles,
+                                            onClick = {
+                                                autoFocusLoadedLanguage = true
+                                                onFetchAddonSubtitles()
+                                            },
                                         )
                                     }
                                 }
@@ -290,7 +324,7 @@ fun SubtitleModal(
                     ) {
                         SubtitleRail(
                             title = stringResource(Res.string.compose_player_style),
-                            width = 280.dp,
+                            width = styleRailWidth,
                         ) {
                             Column(
                                 modifier = Modifier

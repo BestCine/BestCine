@@ -161,6 +161,7 @@ internal fun LazyListScope.homescreenSettingsContent(
         ) {
             BestCineStreamingCatalogsSectionCard(
                 isTablet = isTablet,
+                showBestCineDefaultCatalogs = settingsUiState.showBestCineDefaultCatalogs,
                 config = settingsUiState.streamingCatalogConfig,
             )
         }
@@ -403,6 +404,7 @@ private fun HomescreenCatalogList(
 @Composable
 internal fun BestCineStreamingCatalogsSectionCard(
     isTablet: Boolean,
+    showBestCineDefaultCatalogs: Boolean,
     config: BestCineStreamingCatalogConfig,
 ) {
     val tokens = MaterialTheme.nuvio
@@ -414,6 +416,14 @@ internal fun BestCineStreamingCatalogsSectionCard(
     val activeRowCount = if (config.enabled) selectedSet.size * typesMultiplier else 0
 
     SettingsGroup(isTablet = isTablet) {
+        SettingsSwitchRow(
+            title = "Catálogos padrão do BestCine na Home",
+            description = "Exibe as fileiras padrão do BestCine na Tela Inicial. Desative se quiser mostrar apenas seus addons de catálogo externos (os streams e a TV ao Vivo continuam funcionando normalmente).",
+            checked = showBestCineDefaultCatalogs,
+            isTablet = isTablet,
+            onCheckedChange = HomeCatalogSettingsRepository::setShowBestCineDefaultCatalogs,
+        )
+        SettingsGroupDivider(isTablet = isTablet)
         SettingsSwitchRow(
             title = "Filmes & Séries • Lançamentos",
             description = "Exibe fileiras dedicadas com os filmes e séries mais recentes no Brasil via TMDB (cache de 6h).",

@@ -10,9 +10,10 @@ import java.io.IOException
 import java.net.InetAddress
 import java.net.InetSocketAddress
 import java.net.URI
+import java.net.URL
 import java.net.URLDecoder
-import java.net.URLEncoder
 import java.nio.charset.StandardCharsets
+import java.security.MessageDigest
 import java.util.Base64
 import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
@@ -27,6 +28,33 @@ import java.util.concurrent.TimeUnit
 internal object BestCineLocalDohStreamProxy {
     private val log = Logger.withTag("BestCineDohProxy")
     private val lock = Any()
+    private val tokenLock = Any()
+
+    private const val MAX_URL_TOKENS = 4096
+
+    private val ALLOWED_PROXY_EXTENSIONS = setOf(
+        "m3u8", "m3u", "ts", "m4s", "mp4", "m4v", "m4a", "aac", "mp3",
+        "vtt", "webvtt", "mkv", "webm", "key", "ogg", "oga", "ogv",
+        "mpeg", "mpg", "mov", "flac", "wav", "3gp",
+    )
+
+    private val NON_PLAYLIST_EXTENSIONS = setOf(
+        "key", "ts", "m4s", "mp4", "m4v", "m4a", "aac", "mp3",
+        "vtt", "webvtt", "mkv", "webm", "ogg", "oga", "ogv",
+        "mpeg", "mpg", "mov", "flac", "wav", "3gp",
+    )
+
+    private data class ProxyTarget(
+        val targetUrl: String,
+        val sessionId: String,
+    )
+
+    // Cache LRU ordenado por acesso: playlists master/variantes consultadas a cada poucos segundos
+    // permanecem quentes enquanto segmentos antigos expiram naturalmente sem quebrar o canal ao vivo.
+    private val urlTokens = object : LinkedHashMap<String, ProxyTarget>(512, 0.75f, true) {
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, ProxyTarget>?): Boolean =
+            size > MAX_URL_TOKENS
+    }
 
     @Volatile
     private var server: HttpServer? = null
@@ -81,7 +109,12 @@ internal object BestCineLocalDohStreamProxy {
         }
         sessionHeaders[sessionId] = headersMap
 
-        val proxiedUrl = buildProxyUrl(boundPort, trimmed, sessionId)
+        val proxiedUrl = buildProxyUrl(
+            boundPort = boundPort,
+            targetUrl = trimmed,
+            sessionId = sessionId,
+            defaultExtension = inferInitialExtension(trimmed),
+        )
         return PlaybackTarget(url = proxiedUrl, headerLines = emptyList())
     }
 
@@ -115,22 +148,13 @@ internal object BestCineLocalDohStreamProxy {
                 return
             }
 
-            val queryParams = parseQueryParams(exchange.requestURI.rawQuery.orEmpty())
-            val encodedTarget = queryParams["u"]
-            val sessionId = queryParams["s"].orEmpty()
-            if (encodedTarget.isNullOrBlank()) {
-                exchange.sendResponseHeaders(400, -1)
+            val resolvedTarget = resolveRequestTarget(exchange.requestURI)
+            if (resolvedTarget == null) {
+                exchange.sendResponseHeaders(404, -1)
                 return
             }
-
-            val targetUrl = runCatching {
-                String(Base64.getUrlDecoder().decode(encodedTarget), StandardCharsets.UTF_8)
-            }.getOrNull()?.takeIf {
-                it.startsWith("http://", ignoreCase = true) || it.startsWith("https://", ignoreCase = true)
-            } ?: run {
-                exchange.sendResponseHeaders(400, -1)
-                return
-            }
+            val targetUrl = resolvedTarget.targetUrl
+            val sessionId = resolvedTarget.sessionId
 
             val reqBuilder = Request.Builder().url(targetUrl)
             if (method == "HEAD") reqBuilder.head() else reqBuilder.get()
@@ -158,24 +182,42 @@ internal object BestCineLocalDohStreamProxy {
                 val contentType = response.header("Content-Type").orEmpty()
                 val finalUrl = response.request.url.toString()
 
-                val isHlsPlaylist = isM3u8Playlist(finalUrl, contentType)
-                if (isHlsPlaylist && method == "GET" && response.isSuccessful) {
-                    val playlistText = response.body?.string().orEmpty()
-                    val rewritten = rewriteM3u8Playlist(
-                        playlist = playlistText,
-                        baseUrl = finalUrl,
-                        boundPort = port,
-                        sessionId = sessionId,
-                    )
-                    val bytes = rewritten.toByteArray(StandardCharsets.UTF_8)
-                    exchange.responseHeaders.set(
-                        "Content-Type",
-                        if (contentType.isNotBlank()) contentType else "application/vnd.apple.mpegurl",
-                    )
-                    exchange.responseHeaders.set("Cache-Control", "no-store")
-                    exchange.sendResponseHeaders(statusCode, bytes.size.toLong())
+                // CDNs como Pluto TV servem chaves binárias AES-128 (.key de 16 bytes) com
+                // Content-Type: application/vnd.apple.mpegurl. Só reescrevemos como playlist HLS
+                // quando a extensão NÃO é binária E o corpo realmente começa com #EXTM3U!
+                val candidatePlaylist = method == "GET" &&
+                    response.isSuccessful &&
+                    isCandidateHlsPlaylist(targetUrl, finalUrl, contentType)
+                if (candidatePlaylist) {
+                    val rawBytes = response.body?.bytes() ?: ByteArray(0)
+                    if (startsWithExtM3u(rawBytes)) {
+                        val playlistText = String(rawBytes, StandardCharsets.UTF_8)
+                        val rewritten = rewriteM3u8Playlist(
+                            playlist = playlistText,
+                            baseUrl = finalUrl,
+                            boundPort = port,
+                            sessionId = sessionId,
+                        )
+                        val bytes = rewritten.toByteArray(StandardCharsets.UTF_8)
+                        exchange.responseHeaders.set("Content-Type", "application/vnd.apple.mpegurl")
+                        exchange.responseHeaders.set("Cache-Control", "no-store")
+                        exchange.sendResponseHeaders(statusCode, bytes.size.toLong())
+                        exchange.responseBody.use { out ->
+                            out.write(bytes)
+                            out.flush()
+                        }
+                        return
+                    }
+                    // Não era playlist HLS (ex.: chave AES-128 .key servida com mime mpegurl): devolve os bytes intactos!
+                    val safeCt = if (contentType.isNotBlank() && !contentType.contains("mpegurl", ignoreCase = true)) {
+                        contentType
+                    } else {
+                        "application/octet-stream"
+                    }
+                    exchange.responseHeaders.set("Content-Type", safeCt)
+                    exchange.sendResponseHeaders(statusCode, rawBytes.size.toLong())
                     exchange.responseBody.use { out ->
-                        out.write(bytes)
+                        out.write(rawBytes)
                         out.flush()
                     }
                     return
@@ -218,11 +260,59 @@ internal object BestCineLocalDohStreamProxy {
         }
     }
 
-    private fun isM3u8Playlist(url: String, contentType: String): Boolean {
+    private fun resolveRequestTarget(requestUri: URI): ProxyTarget? {
+        val rawPath = requestUri.rawPath.orEmpty()
+        if (rawPath.startsWith("/p/")) {
+            val fileSegment = rawPath.substringAfter("/p/").substringBefore('/')
+            val token = fileSegment.substringBefore('.').trim()
+            if (token.isNotEmpty()) {
+                synchronized(tokenLock) {
+                    urlTokens[token]?.let { return it }
+                }
+            }
+        }
+        // Compatibilidade com formato legado /p?u=<base64>&s=<session>
+        val queryParams = parseQueryParams(requestUri.rawQuery.orEmpty())
+        val encodedTarget = queryParams["u"] ?: return null
+        val sessionId = queryParams["s"].orEmpty()
+        val decoded = runCatching {
+            String(Base64.getUrlDecoder().decode(encodedTarget), StandardCharsets.UTF_8)
+        }.getOrNull()?.takeIf {
+            it.startsWith("http://", ignoreCase = true) || it.startsWith("https://", ignoreCase = true)
+        } ?: return null
+        return ProxyTarget(targetUrl = decoded, sessionId = sessionId)
+    }
+
+    private fun isCandidateHlsPlaylist(targetUrl: String, finalUrl: String, contentType: String): Boolean {
+        val extTarget = extractUrlExtension(targetUrl)
+        val extFinal = extractUrlExtension(finalUrl)
+        if (extTarget in NON_PLAYLIST_EXTENSIONS || extFinal in NON_PLAYLIST_EXTENSIONS) {
+            return false
+        }
+        if (extTarget == "m3u8" || extTarget == "m3u" || extFinal == "m3u8" || extFinal == "m3u") {
+            return true
+        }
         val ct = contentType.lowercase()
-        if (ct.contains("mpegurl") || ct.contains("x-mpegurl")) return true
-        val path = url.substringBefore('?').substringBefore('#').lowercase()
-        return path.endsWith(".m3u8") || path.endsWith(".m3u")
+        return ct.contains("mpegurl") || ct.contains("x-mpegurl")
+    }
+
+    private fun startsWithExtM3u(bytes: ByteArray): Boolean {
+        if (bytes.size < 7) return false
+        var i = 0
+        if (bytes[0] == 0xEF.toByte() && bytes[1] == 0xBB.toByte() && bytes[2] == 0xBF.toByte()) {
+            i = 3
+        }
+        while (i < bytes.size && (bytes[i] == 0x20.toByte() || bytes[i] == 0x09.toByte() || bytes[i] == 0x0D.toByte() || bytes[i] == 0x0A.toByte())) {
+            i += 1
+        }
+        if (i + 7 > bytes.size) return false
+        return bytes[i] == '#'.code.toByte() &&
+            bytes[i + 1] == 'E'.code.toByte() &&
+            bytes[i + 2] == 'X'.code.toByte() &&
+            bytes[i + 3] == 'T'.code.toByte() &&
+            bytes[i + 4] == 'M'.code.toByte() &&
+            bytes[i + 5] == '3'.code.toByte() &&
+            bytes[i + 6] == 'U'.code.toByte()
     }
 
     private fun rewriteM3u8Playlist(
@@ -231,46 +321,99 @@ internal object BestCineLocalDohStreamProxy {
         boundPort: Int,
         sessionId: String,
     ): String {
-        val baseUri = runCatching { URI(baseUrl) }.getOrNull() ?: return playlist
         val uriAttrRegex = Regex("""URI="([^"]+)"""")
+        var previousLineWasStreamInf = false
 
         return playlist.lineSequence().joinToString("\n") { line ->
             val trimmed = line.trim()
             when {
                 trimmed.isEmpty() -> line
                 trimmed.startsWith("#") -> {
+                    previousLineWasStreamInf = trimmed.startsWith("#EXT-X-STREAM-INF", ignoreCase = true)
+                    val defaultExt = when {
+                        trimmed.startsWith("#EXT-X-KEY", ignoreCase = true) -> "key"
+                        trimmed.startsWith("#EXT-X-MAP", ignoreCase = true) -> "mp4"
+                        else -> "m3u8"
+                    }
                     uriAttrRegex.replace(line) { match ->
                         val rawUri = match.groupValues[1]
-                        val resolved = resolveAgainstBase(baseUri, rawUri)
+                        val resolved = resolveAgainstBase(baseUrl, rawUri)
                         if (resolved != null) {
-                            """URI="${buildProxyUrl(boundPort, resolved, sessionId)}""""
+                            """URI="${buildProxyUrl(boundPort, resolved, sessionId, defaultExt)}""""
                         } else {
                             match.value
                         }
                     }
                 }
                 else -> {
-                    val resolved = resolveAgainstBase(baseUri, trimmed)
-                    if (resolved != null) buildProxyUrl(boundPort, resolved, sessionId) else line
+                    val defaultExt = if (previousLineWasStreamInf) "m3u8" else "ts"
+                    previousLineWasStreamInf = false
+                    val resolved = resolveAgainstBase(baseUrl, trimmed)
+                    if (resolved != null) buildProxyUrl(boundPort, resolved, sessionId, defaultExt) else line
                 }
             }
         }
     }
 
-    private fun resolveAgainstBase(baseUri: URI, relativeOrAbsolute: String): String? =
-        runCatching {
-            val resolved = baseUri.resolve(relativeOrAbsolute).toString()
-            resolved.takeIf {
-                it.startsWith("http://", ignoreCase = true) || it.startsWith("https://", ignoreCase = true)
-            }
+    private fun resolveAgainstBase(baseUrl: String, relativeOrAbsolute: String): String? {
+        val viaUri = runCatching {
+            URI(baseUrl).resolve(relativeOrAbsolute).toString()
         }.getOrNull()
-
-    private fun buildProxyUrl(boundPort: Int, targetUrl: String, sessionId: String): String {
-        val encoded = Base64.getUrlEncoder().withoutPadding()
-            .encodeToString(targetUrl.toByteArray(StandardCharsets.UTF_8))
-        val safeSession = URLEncoder.encode(sessionId, "UTF-8")
-        return "http://127.0.0.1:$boundPort/p?u=$encoded&s=$safeSession"
+        val resolved = viaUri ?: runCatching {
+            URL(URL(baseUrl), relativeOrAbsolute).toString()
+        }.getOrNull()
+        return resolved?.takeIf {
+            it.startsWith("http://", ignoreCase = true) || it.startsWith("https://", ignoreCase = true)
+        }
     }
+
+    private fun extractUrlExtension(url: String): String? {
+        val cleanPath = url.substringBefore('?').substringBefore('#')
+        val lastSeg = cleanPath.substringAfterLast('/', "")
+        val dotIdx = lastSeg.lastIndexOf('.')
+        if (dotIdx <= 0 || dotIdx >= lastSeg.length - 1) return null
+        val ext = lastSeg.substring(dotIdx + 1).lowercase()
+        return ext.takeIf { it.length in 2..6 && it.all { ch -> ch in 'a'..'z' || ch in '0'..'9' } }
+    }
+
+    private fun inferInitialExtension(url: String): String {
+        val ext = extractUrlExtension(url)
+        if (ext != null && ext in ALLOWED_PROXY_EXTENSIONS) return ext
+        return "m3u8"
+    }
+
+    /**
+     * Gera URL curta e determinística (`/p/<hash16>.<ext>`) para satisfazer:
+     * 1) `allowed_segment_extensions` do FFmpeg/libmpv (exige extensão `.ts`, `.m3u8`, `.vtt`, `.m4s`, `.mp4`, `.key` no caminho);
+     * 2) Limite de URL (4096 bytes) do demuxer HLS (ex.: Pluto TV envia JWTs de ~2.800 chars que explodiam em Base64);
+     * 3) Determinismo entre refreshes de playlist (o FFmpeg reconhece segmentos/chaves já baixados).
+     */
+    private fun buildProxyUrl(
+        boundPort: Int,
+        targetUrl: String,
+        sessionId: String,
+        defaultExtension: String,
+    ): String {
+        val ext = extractUrlExtension(targetUrl)?.takeIf { it in ALLOWED_PROXY_EXTENSIONS } ?: defaultExtension
+        val token = shortStableToken("$sessionId|$targetUrl")
+        synchronized(tokenLock) {
+            urlTokens[token] = ProxyTarget(targetUrl = targetUrl, sessionId = sessionId)
+        }
+        return "http://127.0.0.1:$boundPort/p/$token.$ext"
+    }
+
+    private fun shortStableToken(input: String): String {
+        val digest = MessageDigest.getInstance("SHA-256").digest(input.toByteArray(StandardCharsets.UTF_8))
+        val sb = StringBuilder(16)
+        for (i in 0 until 8) {
+            val b = digest[i].toInt() and 0xFF
+            sb.append(HEX_CHARS[b ushr 4])
+            sb.append(HEX_CHARS[b and 0x0F])
+        }
+        return sb.toString()
+    }
+
+    private const val HEX_CHARS = "0123456789abcdef"
 
     private fun parseQueryParams(rawQuery: String): Map<String, String> {
         if (rawQuery.isBlank()) return emptyMap()

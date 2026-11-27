@@ -69,6 +69,9 @@ abstract class GenerateRuntimeConfigsTask : DefaultTask() {
     @get:Input
     abstract val bestCineClientSecret: Property<String>
 
+    @get:Input
+    abstract val bestCineServerUrl: Property<String>
+
     @TaskAction
     fun generate() {
         val props = Properties()
@@ -126,6 +129,7 @@ abstract class GenerateRuntimeConfigsTask : DefaultTask() {
                 |
                 |object BestCineClientConfig {
                 |    const val CLIENT_SECRET = "${bestCineClientSecret.get()}"
+                |    const val SERVER_BASE_URL = "${bestCineServerUrl.get()}"
                 |}
                 """.trimMargin()
             )
@@ -585,6 +589,7 @@ val generateRuntimeConfigs = tasks.register<GenerateRuntimeConfigsTask>("generat
     sentryDesktopDsn.set(runtimeConfigValue("SENTRY_DESKTOP_DSN"))
     tmdbApiKey.set(runtimeConfigValue("TMDB_API_KEY"))
     bestCineClientSecret.set(runtimeConfigValue("BESTCINE_CLIENT_SECRET"))
+    bestCineServerUrl.set(runtimeConfigValue("BESTCINE_SERVER_URL"))
     sentryEnvironment.set(
         when {
             requestedGradleTasks.any { "benchmark" in it } -> "benchmark"

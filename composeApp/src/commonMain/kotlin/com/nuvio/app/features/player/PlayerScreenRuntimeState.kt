@@ -132,8 +132,8 @@ internal class PlayerScreenRuntime(
     var episodeStreamsRepoState by mutableStateOf(StreamsUiState())
     var metaUiState: MetaDetailsUiState = MetaDetailsUiState()
     var addonsUiState: AddonsUiState = AddonsUiState()
-    var addonSubtitles: List<AddonSubtitle> = emptyList()
-    var isLoadingAddonSubtitles: Boolean = false
+    var addonSubtitles by mutableStateOf<List<AddonSubtitle>>(emptyList())
+    var isLoadingAddonSubtitles by mutableStateOf(false)
 
     var horizontalSafePadding: Dp = 0.dp
     var metrics: PlayerLayoutMetrics = PlayerLayoutMetrics.fromWidth(0.dp)
@@ -325,6 +325,7 @@ internal class PlayerScreenRuntime(
     var selectedAudioIndex by mutableStateOf(-1)
     var selectedSubtitleIndex by mutableStateOf(-1)
     var selectedAddonSubtitleId by mutableStateOf<String?>(null)
+    var activeAddonSubtitle by mutableStateOf<AddonSubtitle?>(null)
     var useCustomSubtitles by mutableStateOf(false)
     var preferredAudioSelectionApplied by mutableStateOf(false)
     var appliedAudioPreferences: AppliedAudioPreferences? = null

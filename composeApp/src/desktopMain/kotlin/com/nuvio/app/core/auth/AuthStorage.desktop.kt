@@ -22,4 +22,15 @@ internal actual object AuthStorage {
     actual fun saveFlag(key: String, value: Boolean) {
         store.putBoolean(key, value)
     }
+
+    actual fun loadSupabaseSessionJson(): String? =
+        store.getString("supabase_session_json")
+
+    actual fun saveSupabaseSessionJson(sessionJson: String) {
+        store.putString("supabase_session_json", sessionJson)
+    }
+
+    actual fun clearSupabaseSessionJson() {
+        store.remove("supabase_session_json")
+    }
 }
