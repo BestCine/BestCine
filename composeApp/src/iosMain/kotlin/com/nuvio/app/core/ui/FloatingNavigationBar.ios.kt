@@ -18,37 +18,10 @@ internal actual fun FloatingNavigationBar(
     compactSize: Boolean,
     glowEnabled: Boolean,
 ) {
-    NuvioNavigationBar(
+    BestCineBottomNavigationBar(
+        items = items,
         modifier = modifier,
-        scrollState = scrollState,
         hazeState = hazeState,
-        contentPadding = contentPadding,
         compactSize = compactSize,
-    ) {
-        items.forEach { item ->
-            when {
-                item.icon != null -> NavItem(
-                    selected = item.selected,
-                    onClick = item.onClick,
-                    icon = item.icon,
-                    contentDescription = item.label,
-                    label = item.label,
-                )
-                item.drawable != null -> NavItem(
-                    selected = item.selected,
-                    onClick = item.onClick,
-                    icon = item.drawable,
-                    contentDescription = item.label,
-                    label = item.label,
-                )
-                else -> NavItem(
-                    selected = item.selected,
-                    onClick = item.onClick,
-                    label = item.label,
-                ) {
-                    item.content?.invoke(item.onClick)
-                }
-            }
-        }
-    }
+    )
 }

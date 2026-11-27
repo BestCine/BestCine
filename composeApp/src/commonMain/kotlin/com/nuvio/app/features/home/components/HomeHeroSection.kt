@@ -59,6 +59,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.nuvio.app.isDesktop
 import com.nuvio.app.core.ui.FullscreenActionButton
 import com.nuvio.app.core.ui.DesktopBackdropVerticalBias
@@ -67,6 +68,8 @@ import com.nuvio.app.core.ui.NuvioAsyncImage as AsyncImage
 import com.nuvio.app.core.ui.NuvioTokens
 import com.nuvio.app.core.ui.nuvioFocusBorder
 import com.nuvio.app.core.ui.isFullscreenActionSupported
+import com.nuvio.app.features.settings.DesktopNavigationLayout
+import com.nuvio.app.features.settings.ThemeSettingsRepository
 import com.nuvio.app.core.ui.heroStretchHeight
 import com.nuvio.app.core.ui.ScreenActivityEffect
 import com.nuvio.app.core.ui.heroStretchZoom
@@ -670,7 +673,8 @@ private fun DesktopHomeHeroFrame(
                 )
             }
 
-            if (isFullscreenActionSupported) {
+            val desktopNavLayout by ThemeSettingsRepository.desktopNavigationLayout.collectAsStateWithLifecycle()
+            if (isFullscreenActionSupported && desktopNavLayout != DesktopNavigationLayout.TopBar) {
                 FullscreenActionButton(
                     modifier = Modifier
                         .align(Alignment.TopEnd)

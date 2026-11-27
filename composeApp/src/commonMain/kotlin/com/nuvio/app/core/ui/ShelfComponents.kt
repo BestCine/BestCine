@@ -95,6 +95,41 @@ fun <T> NuvioShelfSection(
     state: LazyListState = rememberLazyListState(),
     itemContent: @Composable (T) -> Unit,
 ) {
+    NuvioShelfSectionIndexed(
+        title = title,
+        entries = entries,
+        modifier = modifier,
+        rowModifier = rowModifier,
+        headerHorizontalPadding = headerHorizontalPadding,
+        rowContentPadding = rowContentPadding,
+        itemSpacing = itemSpacing,
+        onViewAllClick = onViewAllClick,
+        onTitleClick = onTitleClick,
+        viewAllPillSize = viewAllPillSize,
+        key = key,
+        animatePlacement = animatePlacement,
+        state = state,
+        itemContent = { _, item -> itemContent(item) },
+    )
+}
+
+@Composable
+fun <T> NuvioShelfSectionIndexed(
+    title: String,
+    entries: List<T>,
+    modifier: Modifier = Modifier,
+    rowModifier: Modifier = Modifier,
+    headerHorizontalPadding: Dp = 0.dp,
+    rowContentPadding: PaddingValues = PaddingValues(0.dp),
+    itemSpacing: Dp = 10.dp,
+    onViewAllClick: (() -> Unit)? = null,
+    onTitleClick: (() -> Unit)? = null,
+    viewAllPillSize: NuvioViewAllPillSize = NuvioViewAllPillSize.Default,
+    key: ((T) -> Any)? = null,
+    animatePlacement: Boolean = false,
+    state: LazyListState = rememberLazyListState(),
+    itemContent: @Composable (Int, T) -> Unit,
+) {
     val tokens = MaterialTheme.nuvio
     val duplicateSafeEntries = remember(entries, key) {
         key?.let { entries.withDuplicateSafeLazyKeys(it) }
@@ -134,22 +169,22 @@ fun <T> NuvioShelfSection(
                             items = duplicateSafeEntries,
                             key = { _, entry -> entry.lazyKey },
                             contentType = { _, _ -> "poster" },
-                        ) { _, keyedEntry ->
+                        ) { index, keyedEntry ->
                             if (animatePlacement) {
-                                Box(modifier = Modifier.animateItem()) { itemContent(keyedEntry.value) }
+                                Box(modifier = Modifier.animateItem()) { itemContent(index, keyedEntry.value) }
                             } else {
-                                itemContent(keyedEntry.value)
+                                itemContent(index, keyedEntry.value)
                             }
                         }
                     } else {
                         itemsIndexed(
                             items = entries,
                             contentType = { _, _ -> "poster" },
-                        ) { _, entry ->
+                        ) { index, entry ->
                             if (animatePlacement) {
-                                Box(modifier = Modifier.animateItem()) { itemContent(entry) }
+                                Box(modifier = Modifier.animateItem()) { itemContent(index, entry) }
                             } else {
-                                itemContent(entry)
+                                itemContent(index, entry)
                             }
                         }
                     }
@@ -254,6 +289,7 @@ fun NuvioPosterCard(
     bottomLeftLogoUrl: String? = null,
     bottomLeftText: String? = null,
     isWatched: Boolean = false,
+    nativeBadge: BestCinePosterBadgeSpec? = null,
     onClick: (() -> Unit)? = null,
     onLongClick: (() -> Unit)? = null,
 ) {
@@ -370,6 +406,14 @@ fun NuvioPosterCard(
                         )
                     }
                 }
+            }
+
+            val hasCustomPosterOverride = !fallbackImageUrl.isNullOrBlank() && fallbackImageUrl != imageUrl
+            if (posterCardStyle.nativePosterBadgesEnabled && shape == NuvioPosterShape.Poster && !hasCustomPosterOverride) {
+                BestCinePosterNativeOverlay(
+                    badge = nativeBadge,
+                    isCompactCard = effectiveBasePosterWidthDp <= 112,
+                )
             }
 
             NuvioPosterWatchedOverlay(isWatched = isWatched)

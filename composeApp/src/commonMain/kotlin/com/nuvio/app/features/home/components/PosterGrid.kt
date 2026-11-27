@@ -27,6 +27,7 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import com.nuvio.app.core.format.formatReleaseDateForDisplay
 import coil3.compose.AsyncImage
+import com.nuvio.app.core.ui.BestCinePosterNativeOverlay
 import com.nuvio.app.core.ui.NuvioAsyncImage
 import com.nuvio.app.core.ui.NuvioCardDepthSurface
 import com.nuvio.app.core.ui.NuvioPosterWatchedOverlay
@@ -35,6 +36,7 @@ import com.nuvio.app.core.ui.desktopPosterHoverScale
 import com.nuvio.app.core.ui.nuvioCardDepth
 import com.nuvio.app.core.ui.posterCardClickable
 import com.nuvio.app.core.ui.rememberPosterCardStyleUiState
+import com.nuvio.app.core.ui.resolveBestCinePosterBadges
 import com.nuvio.app.features.home.MetaPreview
 import com.nuvio.app.features.home.PosterShape
 import com.nuvio.app.features.watching.application.WatchingState
@@ -65,6 +67,7 @@ internal fun PosterGridRow(
                 item = item,
                 cornerRadiusDp = posterCardStyle.cornerRadiusDp,
                 hideLabels = posterCardStyle.hideLabelsEnabled,
+                nativePosterBadgesEnabled = posterCardStyle.nativePosterBadgesEnabled,
                 modifier = Modifier.weight(1f),
                 isWatched = WatchingState.isPosterWatched(
                     watchedKeys = watchedKeys,
@@ -108,6 +111,7 @@ private fun PosterGridTile(
     item: MetaPreview,
     cornerRadiusDp: Int,
     hideLabels: Boolean,
+    nativePosterBadgesEnabled: Boolean,
     modifier: Modifier = Modifier,
     isWatched: Boolean = false,
     onClick: (() -> Unit)? = null,
@@ -176,6 +180,25 @@ private fun PosterGridTile(
                             contentScale = ContentScale.Crop,
                         )
                     }
+                }
+                val hasCustomPosterOverride = !item.rawPosterUrl.isNullOrBlank() && item.rawPosterUrl != item.poster
+                if (nativePosterBadgesEnabled && item.posterShape == PosterShape.Poster && !hasCustomPosterOverride) {
+                    val nativeBadge = remember(
+                        item.type,
+                        item.genres,
+                        item.imdbRating,
+                        item.releaseInfo,
+                        item.rawReleaseDate,
+                    ) {
+                        resolveBestCinePosterBadges(
+                            type = item.type,
+                            genres = item.genres,
+                            imdbRating = item.imdbRating,
+                            releaseInfo = item.releaseInfo,
+                            rawReleaseDate = item.rawReleaseDate,
+                        )
+                    }
+                    BestCinePosterNativeOverlay(badge = nativeBadge)
                 }
                 NuvioPosterWatchedOverlay(isWatched = isWatched)
             }

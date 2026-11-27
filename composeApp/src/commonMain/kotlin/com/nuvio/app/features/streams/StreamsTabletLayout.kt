@@ -69,6 +69,7 @@ import dev.chrisbanes.haze.rememberHazeState
 import nuvio.composeapp.generated.resources.*
 import org.jetbrains.compose.resources.stringResource
 import com.nuvio.app.core.i18n.localizedEpisodeTitle
+import com.nuvio.app.features.downloads.DownloadItem
 
 @Composable
 internal fun TabletStreamsLayout(
@@ -91,6 +92,9 @@ internal fun TabletStreamsLayout(
     onStreamLongPress: (StreamItem) -> Unit,
     onStreamSecondaryClick: (StreamItem, Offset) -> Unit,
     onRefresh: () -> Unit,
+    onStreamDownload: ((StreamItem) -> Unit)? = null,
+    downloadItemForStream: (StreamItem) -> DownloadItem? = { null },
+    resolvingDownloadStreamKey: String? = null,
     modifier: Modifier = Modifier,
 ) {
     if (!isDesktop) {
@@ -113,6 +117,9 @@ internal fun TabletStreamsLayout(
             onStreamLongPress = onStreamLongPress,
             onStreamSecondaryClick = onStreamSecondaryClick,
             onRefresh = onRefresh,
+            onStreamDownload = onStreamDownload,
+            downloadItemForStream = downloadItemForStream,
+            resolvingDownloadStreamKey = resolvingDownloadStreamKey,
             modifier = modifier,
         )
         return
@@ -293,6 +300,9 @@ internal fun TabletStreamsLayout(
                         onStreamSecondaryClick = onStreamSecondaryClick,
                         resumePositionMs = resumePositionMs,
                         resumeProgressFraction = resumeProgressFraction,
+                        onStreamDownload = onStreamDownload,
+                        downloadItemForStream = downloadItemForStream,
+                        resolvingDownloadStreamKey = resolvingDownloadStreamKey,
                         modifier = Modifier.weight(1f),
                     )
                 }
@@ -321,6 +331,9 @@ private fun LegacyTabletStreamsLayout(
     onStreamLongPress: (StreamItem) -> Unit,
     onStreamSecondaryClick: (StreamItem, Offset) -> Unit,
     onRefresh: () -> Unit,
+    onStreamDownload: ((StreamItem) -> Unit)? = null,
+    downloadItemForStream: (StreamItem) -> DownloadItem? = { null },
+    resolvingDownloadStreamKey: String? = null,
     modifier: Modifier = Modifier,
 ) {
     val hazeState = rememberHazeState()
@@ -472,6 +485,9 @@ private fun LegacyTabletStreamsLayout(
                                 onStreamSecondaryClick = onStreamSecondaryClick,
                                 resumePositionMs = resumePositionMs,
                                 resumeProgressFraction = resumeProgressFraction,
+                                onStreamDownload = onStreamDownload,
+                                downloadItemForStream = downloadItemForStream,
+                                resolvingDownloadStreamKey = resolvingDownloadStreamKey,
                                 modifier = Modifier.weight(1f),
                             )
                         }

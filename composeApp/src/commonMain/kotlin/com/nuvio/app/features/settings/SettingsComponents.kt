@@ -3,7 +3,10 @@ package com.nuvio.app.features.settings
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -82,7 +85,7 @@ private fun SettingsCard(
         color = tokens.colors.surface,
         shape = tokens.shapes.card,
         border = BorderStroke(
-            tokens.borders.hairline,
+            tokens.borders.thin,
             tokens.colors.borderSubtle,
         ),
     ) {
@@ -166,21 +169,45 @@ internal fun SettingsSidebarItem(
 ) {
     val tokens = MaterialTheme.nuvio
     val primary = tokens.colors.accent
-    val background = if (selected) primary.copy(alpha = tokens.opacity.hover) else Color.Transparent
-    val iconChip = if (selected) primary.copy(alpha = tokens.opacity.selected) else Color.Transparent
+    val iconChip = if (selected) primary.copy(alpha = 0.20f) else Color.Transparent
     val contentColor = if (selected) tokens.colors.textPrimary else tokens.colors.textMuted
 
-    val sidebarItemShape = RoundedCornerShape(NuvioTokens.Space.s10)
+    val sidebarItemShape = RoundedCornerShape(NuvioTokens.Space.s12)
+    val selectedBg = Brush.horizontalGradient(
+        colors = listOf(
+            primary.copy(alpha = 0.20f),
+            primary.copy(alpha = 0.05f),
+        ),
+    )
     Row(
         modifier = modifier
             .fillMaxWidth()
-            .padding(horizontal = tokens.spacing.listGap, vertical = NuvioTokens.Space.s2)
-            .background(background, sidebarItemShape)
+            .padding(horizontal = tokens.spacing.listGap, vertical = NuvioTokens.Space.s3)
+            .clip(sidebarItemShape)
+            .then(
+                if (selected) {
+                    Modifier
+                        .background(selectedBg, sidebarItemShape)
+                        .border(1.dp, primary.copy(alpha = 0.35f), sidebarItemShape)
+                } else {
+                    Modifier
+                },
+            )
             .nuvioFocusBorder(sidebarItemShape)
             .clickable(onClick = onClick)
-            .padding(horizontal = tokens.spacing.screenHorizontal, vertical = tokens.spacing.listGap),
+            .padding(horizontal = 12.dp, vertical = 10.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
+        if (selected) {
+            Box(
+                modifier = Modifier
+                    .width(3.dp)
+                    .height(20.dp)
+                    .clip(RoundedCornerShape(999.dp))
+                    .background(primary),
+            )
+            Spacer(modifier = Modifier.width(8.dp))
+        }
         Surface(
             modifier = Modifier.size(tokens.icons.xl),
             color = iconChip,

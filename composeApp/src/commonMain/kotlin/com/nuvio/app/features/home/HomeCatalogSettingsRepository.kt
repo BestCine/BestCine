@@ -96,6 +96,7 @@ private data class StoredHomeCatalogSettingsPayload(
     val showCatalogType: Boolean = true,
     val hideUnreleasedContent: Boolean = false,
     val items: List<StoredHomeCatalogPreference> = emptyList(),
+    val releasesCatalogEnabled: Boolean = true,
     val momentCatalogEnabled: Boolean = true,
     val seasonalCatalogEnabled: Boolean = true,
     val runtimeCatalogsEnabled: Boolean = false,
@@ -140,6 +141,7 @@ object HomeCatalogSettingsRepository {
     private var heroEnabled = true
     private var showCatalogType = true
     private var hideUnreleasedContent = false
+    private var releasesCatalogEnabled = true
     private var momentCatalogEnabled = true
     private var seasonalCatalogEnabled = true
     private var runtimeCatalogsEnabled = false
@@ -155,6 +157,7 @@ object HomeCatalogSettingsRepository {
         heroEnabled = true
         showCatalogType = true
         hideUnreleasedContent = false
+        releasesCatalogEnabled = true
         momentCatalogEnabled = true
         seasonalCatalogEnabled = true
         runtimeCatalogsEnabled = false
@@ -182,6 +185,7 @@ object HomeCatalogSettingsRepository {
         heroEnabled = true
         showCatalogType = true
         hideUnreleasedContent = false
+        releasesCatalogEnabled = true
         momentCatalogEnabled = true
         seasonalCatalogEnabled = true
         runtimeCatalogsEnabled = false
@@ -210,6 +214,9 @@ object HomeCatalogSettingsRepository {
         bestCineManifestUrl: String,
     ) = withContext(Dispatchers.Default) {
         syncMutex.withLock {
+            ensureLoaded()
+            val hadPersistedPreferencesBeforeSync = preferences.isNotEmpty()
+            val preSyncPreferences = preferences
             lastCatalogSync = null
             syncCatalogsInternal(addons)
 
@@ -239,18 +246,31 @@ object HomeCatalogSettingsRepository {
             val tvCatalogKeys = definitions
                 .filter { it.type.equals("tv", ignoreCase = true) || it.type.equals("channel", ignoreCase = true) }
                 .mapTo(mutableSetOf()) { it.key }
+
+            val finalOrder = if (hadPersistedPreferencesBeforeSync) {
+                val existingOrdered = mergedOrder
+                    .filter { it in preSyncPreferences }
+                    .sortedBy { preSyncPreferences[it]?.order ?: Int.MAX_VALUE }
+                val newKeys = mergedOrder.filterNot { it in preSyncPreferences }
+                existingOrdered + newKeys
+            } else {
+                mergedOrder
+            }
+
             var heroCount = 0
-            mergedOrder.forEachIndexed { index, key ->
-                val existing = updatedPreferences[key]
+            finalOrder.forEachIndexed { index, key ->
+                val existing = if (hadPersistedPreferencesBeforeSync) preSyncPreferences[key] else null
                 val isPrimaryCatalog = key in primaryKeySet
                 val isCollection = collectionDefinitions.any { it.key == key }
                 val isTvCatalog = key in tvCatalogKeys
                 val isStreamingCatalog = BestCineStreamingCatalogs.isStreamingKey(key)
                 val heroEnabledForItem = when {
                     isCollection || isTvCatalog -> false
-                    isStreamingCatalog -> existing?.heroSourceEnabled == true && heroCount < HERO_SOURCE_SELECTION_LIMIT
+                    hadPersistedPreferencesBeforeSync -> {
+                        existing?.heroSourceEnabled == true && heroCount < HERO_SOURCE_SELECTION_LIMIT
+                    }
+                    isStreamingCatalog -> false
                     isPrimaryCatalog -> heroCount < HERO_SOURCE_SELECTION_LIMIT
-                    existing != null -> existing.heroSourceEnabled && heroCount < HERO_SOURCE_SELECTION_LIMIT
                     else -> heroCount < HERO_SOURCE_SELECTION_LIMIT
                 }
                 if (heroEnabledForItem) heroCount += 1
@@ -258,7 +278,7 @@ object HomeCatalogSettingsRepository {
                 updatedPreferences[key] = StoredHomeCatalogPreference(
                     key = key,
                     customTitle = existing?.customTitle.orEmpty(),
-                    enabled = if (isPrimaryCatalog) true else (existing?.enabled ?: true),
+                    enabled = existing?.enabled ?: true,
                     heroSourceEnabled = heroEnabledForItem,
                     order = index,
                 )
@@ -393,6 +413,7 @@ object HomeCatalogSettingsRepository {
 
     private fun currentStreamingCatalogConfig(): BestCineStreamingCatalogConfig =
         BestCineStreamingCatalogConfig(
+            releasesCatalogEnabled = releasesCatalogEnabled,
             momentCatalogEnabled = momentCatalogEnabled,
             seasonalCatalogEnabled = seasonalCatalogEnabled,
             runtimeCatalogsEnabled = runtimeCatalogsEnabled,
@@ -402,6 +423,13 @@ object HomeCatalogSettingsRepository {
             includeMovies = streamingCatalogIncludeMovies,
             includeSeries = streamingCatalogIncludeSeries,
         )
+
+    fun setReleasesCatalogEnabled(enabled: Boolean) {
+        ensureLoaded()
+        if (releasesCatalogEnabled == enabled) return
+        releasesCatalogEnabled = enabled
+        applyStreamingCatalogConfigChange()
+    }
 
     fun setMomentCatalogEnabled(enabled: Boolean) {
         ensureLoaded()
@@ -501,6 +529,7 @@ object HomeCatalogSettingsRepository {
         heroEnabled = true
         showCatalogType = true
         hideUnreleasedContent = false
+        releasesCatalogEnabled = true
         momentCatalogEnabled = true
         seasonalCatalogEnabled = true
         runtimeCatalogsEnabled = false
@@ -564,6 +593,7 @@ object HomeCatalogSettingsRepository {
             heroEnabled = parsedPayload.heroEnabled
             showCatalogType = parsedPayload.showCatalogType
             hideUnreleasedContent = parsedPayload.hideUnreleasedContent
+            releasesCatalogEnabled = parsedPayload.releasesCatalogEnabled
             momentCatalogEnabled = parsedPayload.momentCatalogEnabled
             seasonalCatalogEnabled = parsedPayload.seasonalCatalogEnabled
             runtimeCatalogsEnabled = parsedPayload.runtimeCatalogsEnabled
@@ -705,6 +735,7 @@ object HomeCatalogSettingsRepository {
                 showCatalogType = showCatalogType,
                 hideUnreleasedContent = hideUnreleasedContent,
                 items = preferences.values.sortedBy { it.order },
+                releasesCatalogEnabled = releasesCatalogEnabled,
                 momentCatalogEnabled = momentCatalogEnabled,
                 seasonalCatalogEnabled = seasonalCatalogEnabled,
                 runtimeCatalogsEnabled = runtimeCatalogsEnabled,

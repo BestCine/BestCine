@@ -48,6 +48,7 @@ private data class StoredPosterCardStylePreferences(
     val hoverPreviewTrailerStartSeconds: Int = DefaultHoverPreviewTrailerStartSeconds,
     val alwaysShowLandscapeClearlogo: Boolean = false,
     val animatedArtworkMode: String = AnimatedArtworkMode.Always.name,
+    val nativePosterBadgesEnabled: Boolean = true,
 )
 
 data class PosterCardStyleUiState(
@@ -63,6 +64,7 @@ data class PosterCardStyleUiState(
     val hoverPreviewTrailerStartSeconds: Int = DefaultHoverPreviewTrailerStartSeconds,
     val alwaysShowLandscapeClearlogo: Boolean = false,
     val animatedArtworkMode: AnimatedArtworkMode = AnimatedArtworkMode.Always,
+    val nativePosterBadgesEnabled: Boolean = true,
 )
 
 object PosterCardStyleRepository {
@@ -176,6 +178,13 @@ object PosterCardStyleRepository {
         persist()
     }
 
+    fun setNativePosterBadgesEnabled(enabled: Boolean) {
+        ensureLoaded()
+        if (_uiState.value.nativePosterBadgesEnabled == enabled) return
+        _uiState.value = _uiState.value.copy(nativePosterBadgesEnabled = enabled)
+        persist()
+    }
+
     fun resetToDefaults() {
         ensureLoaded()
         val defaults = PosterCardStyleUiState(
@@ -227,6 +236,7 @@ object PosterCardStyleRepository {
                 animatedArtworkMode = AnimatedArtworkMode.entries
                     .firstOrNull { it.name == stored.animatedArtworkMode }
                     ?: AnimatedArtworkMode.Always,
+                nativePosterBadgesEnabled = stored.nativePosterBadgesEnabled,
             )
         } else {
             PosterCardStyleUiState()
@@ -249,6 +259,7 @@ object PosterCardStyleRepository {
                     hoverPreviewTrailerStartSeconds = _uiState.value.hoverPreviewTrailerStartSeconds,
                     alwaysShowLandscapeClearlogo = _uiState.value.alwaysShowLandscapeClearlogo,
                     animatedArtworkMode = _uiState.value.animatedArtworkMode.name,
+                    nativePosterBadgesEnabled = _uiState.value.nativePosterBadgesEnabled,
                 ),
             ),
         )

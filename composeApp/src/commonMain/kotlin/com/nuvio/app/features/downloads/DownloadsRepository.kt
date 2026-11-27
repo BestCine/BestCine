@@ -50,6 +50,9 @@ object DownloadsRepository {
         notifyLiveStatusPlatform()
     }
 
+    fun isSupportedDownloadUrl(url: String?): Boolean =
+        url?.trim()?.takeIf { it.isNotBlank() }?.isSupportedDownloadUrl() == true
+
     fun findPlayableDownloadByVideoId(videoId: String?): DownloadItem? {
         ensureLoaded()
         val normalizedVideoId = videoId?.trim().orEmpty()

@@ -10,6 +10,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -53,55 +54,61 @@ internal fun BestCineCatalogsSidebarItem(
 ) {
     val tokens = MaterialTheme.nuvio
     val shape = RoundedCornerShape(NuvioTokens.Space.s12)
-    val bgBrush = Brush.horizontalGradient(
-        colors = if (selected) {
-            listOf(
-                BestCineBranding.PrimaryBlue.copy(alpha = 0.36f),
-                BestCineBranding.PrimaryBlueBright.copy(alpha = 0.16f),
-            )
-        } else {
-            listOf(
-                BestCineBranding.PrimaryBlue.copy(alpha = 0.16f),
-                BestCineBranding.PrimaryBlueBright.copy(alpha = 0.06f),
-            )
-        },
-    )
-    val borderColor = if (selected) {
-        BestCineBranding.PrimaryBlueBright.copy(alpha = 0.85f)
-    } else {
-        BestCineBranding.PrimaryBlueBright.copy(alpha = 0.40f)
-    }
 
     Row(
         modifier = modifier
             .fillMaxWidth()
             .padding(horizontal = tokens.spacing.listGap, vertical = NuvioTokens.Space.s4)
             .clip(shape)
-            .background(bgBrush, shape)
-            .border(1.dp, borderColor, shape)
+            .then(
+                if (selected) {
+                    Modifier
+                        .background(
+                            Brush.horizontalGradient(
+                                colors = listOf(
+                                    BestCineBranding.PrimaryBlue.copy(alpha = 0.24f),
+                                    BestCineBranding.PrimaryBlueBright.copy(alpha = 0.08f),
+                                ),
+                            ),
+                            shape,
+                        )
+                        .border(1.dp, BestCineBranding.PrimaryBlueBright.copy(alpha = 0.48f), shape)
+                } else {
+                    Modifier
+                },
+            )
             .nuvioFocusBorder(shape)
             .clickable(onClick = onClick)
             .padding(horizontal = 12.dp, vertical = 10.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
+        if (selected) {
+            Box(
+                modifier = Modifier
+                    .width(3.dp)
+                    .height(22.dp)
+                    .clip(RoundedCornerShape(999.dp))
+                    .background(BestCineBranding.PrimaryBlueBright),
+            )
+            Spacer(modifier = Modifier.width(8.dp))
+        }
         Box(
             modifier = Modifier
                 .size(tokens.icons.xl)
                 .clip(RoundedCornerShape(NuvioTokens.Radius.md))
                 .background(
-                    Brush.linearGradient(
-                        colors = listOf(
-                            BestCineBranding.PrimaryBlueBright,
-                            BestCineBranding.PrimaryBlue,
-                        ),
-                    ),
+                    if (selected) {
+                        BestCineBranding.PrimaryBlue.copy(alpha = 0.28f)
+                    } else {
+                        Color.Transparent
+                    },
                 ),
             contentAlignment = Alignment.Center,
         ) {
             Icon(
                 imageVector = Icons.Rounded.AutoAwesome,
                 contentDescription = null,
-                tint = Color.White,
+                tint = if (selected) BestCineBranding.PrimaryBlueBright else tokens.colors.textMuted,
                 modifier = Modifier.size(18.dp),
             )
         }
@@ -110,16 +117,16 @@ internal fun BestCineCatalogsSidebarItem(
             Text(
                 text = "Catálogos",
                 style = MaterialTheme.typography.bodyLarge,
-                color = Color.White,
-                fontWeight = FontWeight.Bold,
+                color = if (selected) Color.White else tokens.colors.textMuted,
+                fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Medium,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )
             Text(
                 text = "Exclusivo BestCine",
                 fontSize = 11.sp,
-                color = Color(0xFF93C5FD),
-                fontWeight = FontWeight.Medium,
+                color = if (selected) Color(0xFF93C5FD) else tokens.colors.textMuted.copy(alpha = 0.72f),
+                fontWeight = FontWeight.Normal,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )
@@ -127,16 +134,30 @@ internal fun BestCineCatalogsSidebarItem(
         Box(
             modifier = Modifier
                 .clip(RoundedCornerShape(6.dp))
-                .background(BestCineBranding.PrimaryBlue.copy(alpha = 0.38f))
-                .border(1.dp, BestCineBranding.PrimaryBlueBright.copy(alpha = 0.55f), RoundedCornerShape(6.dp))
+                .background(
+                    if (selected) {
+                        BestCineBranding.PrimaryBlue.copy(alpha = 0.34f)
+                    } else {
+                        Color.White.copy(alpha = 0.06f)
+                    },
+                )
+                .border(
+                    width = 1.dp,
+                    color = if (selected) {
+                        BestCineBranding.PrimaryBlueBright.copy(alpha = 0.55f)
+                    } else {
+                        Color.White.copy(alpha = 0.12f)
+                    },
+                    shape = RoundedCornerShape(6.dp),
+                )
                 .padding(horizontal = 6.dp, vertical = 2.dp),
         ) {
             Text(
                 text = "BC",
                 fontSize = 9.sp,
-                fontWeight = FontWeight.ExtraBold,
+                fontWeight = FontWeight.Bold,
                 letterSpacing = 0.5.sp,
-                color = Color(0xFFDBEAFE),
+                color = if (selected) Color(0xFFDBEAFE) else tokens.colors.textMuted,
             )
         }
     }
@@ -237,7 +258,7 @@ internal fun BestCineCatalogsFeaturedRootCard(
                     }
                 }
                 Text(
-                    text = "Sessão do Momento, Sazonal, por Duração e Streamings (Brasil)",
+                    text = "Lançamentos, Sessão do Momento, Sazonal, por Duração e Streamings (Brasil)",
                     style = MaterialTheme.typography.bodySmall,
                     color = Color(0xFFBFDBFE),
                     maxLines = 2,

@@ -415,6 +415,14 @@ internal fun BestCineStreamingCatalogsSectionCard(
 
     SettingsGroup(isTablet = isTablet) {
         SettingsSwitchRow(
+            title = "Filmes & Séries • Lançamentos",
+            description = "Exibe fileiras dedicadas com os filmes e séries mais recentes no Brasil via TMDB (cache de 6h).",
+            checked = config.releasesCatalogEnabled,
+            isTablet = isTablet,
+            onCheckedChange = HomeCatalogSettingsRepository::setReleasesCatalogEnabled,
+        )
+        SettingsGroupDivider(isTablet = isTablet)
+        SettingsSwitchRow(
             title = "Sessão do Momento (Dinâmico por Horário)",
             description = "Agora: ${currentMoment.label} (${currentMoment.subtitle}). Muda automaticamente entre Manhã, Tarde, Noite e Madrugada.",
             checked = config.momentCatalogEnabled,

@@ -10,7 +10,9 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
-import com.nuvio.app.core.network.createApiHttpClient
+import io.ktor.client.HttpClient
+import io.ktor.client.engine.darwin.Darwin
+import io.ktor.client.plugins.HttpTimeout
 import io.ktor.client.request.get
 import io.ktor.client.request.header
 import io.ktor.client.request.prepareGet
@@ -40,6 +42,7 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.cancelChildren
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -58,6 +61,7 @@ import platform.posix.SOCK_DGRAM
 import platform.posix.SOCK_STREAM
 import platform.posix.SOL_SOCKET
 import platform.posix.SO_ERROR
+import platform.posix.SO_NOSIGPIPE
 import platform.posix.SO_REUSEADDR
 import platform.posix.accept
 import platform.posix.bind
@@ -473,7 +477,19 @@ private class IosDlnaHttpProxy private constructor(
     private val isLiveStream: Boolean,
 ) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
-    private val httpClient by lazy { createApiHttpClient() }
+    // Cliente dedicado de streaming DLNA no iOS:
+    // - followRedirects = true (streams VOD/IPTV quase sempre retornam 301/302 da CDN/proxy);
+    // - sem requestTimeoutMillis (permite filmes longos e TV ao vivo sem corte em 30s).
+    private val httpClient by lazy {
+        HttpClient(Darwin) {
+            followRedirects = true
+            expectSuccess = false
+            install(HttpTimeout) {
+                connectTimeoutMillis = 15_000L
+                socketTimeoutMillis = 45_000L
+            }
+        }
+    }
     private var acceptJob: Job? = null
 
     @Volatile
@@ -499,6 +515,8 @@ private class IosDlnaHttpProxy private constructor(
                         if (ready <= 0) continue
                         val clientFd = accept(serverFd, null, null)
                         if (clientFd < 0) continue
+                        // Evita sinal fatal SIGPIPE no iOS/Darwin quando a TV fecha a conexão TCP
+                        disableSigPipe(clientFd)
                         scope.launch {
                             runCatching { handleClient(clientFd) }
                         }
@@ -512,6 +530,7 @@ private class IosDlnaHttpProxy private constructor(
         running = false
         acceptJob?.cancel()
         acceptJob = null
+        scope.coroutineContext.cancelChildren()
         if (serverFd >= 0) {
             close(serverFd)
         }
@@ -1397,13 +1416,28 @@ private class IosDlnaHttpProxy private constructor(
         }
     }
 
-    private fun readHttpRequest(clientFd: Int): String {
-        val buf = ByteArray(4096)
-        val n = buf.usePinned { pinned ->
-            recv(clientFd, pinned.addressOf(0), buf.size.convert(), 0).toInt()
+    private fun readHttpRequest(clientFd: Int): String = memScoped {
+        val pfd = alloc<pollfd>()
+        pfd.fd = clientFd
+        pfd.events = POLLIN.convert()
+        val chunk = ByteArray(2048)
+        val sb = StringBuilder()
+        val deadlineMs = currentTimeMillisIos() + 5_000L
+
+        while (running && sb.length < 8192) {
+            val remaining = (deadlineMs - currentTimeMillisIos()).coerceAtMost(500L)
+            if (remaining <= 0L) break
+            val ready = poll(pfd.ptr, 1u, remaining.toInt())
+            if (ready < 0) break
+            if (ready == 0) continue
+            val n = chunk.usePinned { pinned ->
+                recv(clientFd, pinned.addressOf(0), chunk.size.convert(), 0).toInt()
+            }
+            if (n <= 0) break
+            sb.append(chunk.decodeToString(0, n))
+            if (sb.indexOf("\r\n\r\n") >= 0) break
         }
-        if (n <= 0) return ""
-        return buf.decodeToString(0, n)
+        sb.toString()
     }
 
     private fun writeAll(clientFd: Int, data: ByteArray, length: Int = data.size): Boolean {
@@ -1425,6 +1459,13 @@ private class IosDlnaHttpProxy private constructor(
     }
 
     companion object {
+        private fun disableSigPipe(fd: Int) = memScoped {
+            if (fd < 0) return@memScoped
+            val one = alloc<IntVar>()
+            one.value = 1
+            setsockopt(fd, SOL_SOCKET, SO_NOSIGPIPE, one.ptr, sizeOf<IntVar>().convert())
+        }
+
         fun create(
             defaultUrl: String,
             defaultHeaders: Map<String, String>,
@@ -1437,6 +1478,7 @@ private class IosDlnaHttpProxy private constructor(
             val opt = alloc<IntVar>()
             opt.value = 1
             setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, opt.ptr, sizeOf<IntVar>().convert())
+            disableSigPipe(fd)
 
             val addr = alloc<sockaddr_in>()
             addr.sin_len = sizeOf<sockaddr_in>().toUByte()

@@ -37,84 +37,27 @@ internal fun DesktopNavigationBar(
     modifier: Modifier = Modifier,
     scrollState: NuvioNavBarScrollState? = null,
     hazeState: HazeState? = null,
-    contentPadding: PaddingValues = PaddingValues(top = 10.dp, bottom = 8.dp),
+    contentPadding: PaddingValues = PaddingValues(top = 0.dp, bottom = 0.dp),
     navBarStyle: NavBarStyle = NavBarStyle.ADAPTIVE,
     isHeroEnabled: Boolean = false,
     profileSwitcherOpen: Boolean = false,
     windowWidth: Dp? = null,
     glowEnabled: Boolean = true,
+    onBrandClick: (() -> Unit)? = null,
+    trailingContent: (@Composable () -> Unit)? = null,
 ) {
-    if (items.isEmpty()) return
-    val interactionSource = remember { MutableInteractionSource() }
-    val isHovered by interactionSource.collectIsHoveredAsState()
-    val isHomeSelected = items.first().selected
-    val isSettingsSelected = items.last().selected
-    val scrollOffset = scrollState?.totalScrollOffset ?: 0f
-    val isScrolledAwayFromTop = scrollOffset > if (isSettingsSelected) 70f else 35f
-    val isFrosted = isHovered || profileSwitcherOpen ||
-        ((isHomeSelected || isSettingsSelected) && isScrolledAwayFromTop)
-    val labelFraction by animateFloatAsState(
-        targetValue = desktopNavigationLabelFraction(navBarStyle, isHomeSelected, isHeroEnabled, isHovered, profileSwitcherOpen, isScrolledAwayFromTop),
-        animationSpec = tween(320, easing = FastOutSlowInEasing),
-        label = "desktop_nav_labels",
+    BestCineDesktopTopBar(
+        items = items,
+        modifier = modifier,
+        scrollState = scrollState,
+        hazeState = hazeState,
+        navBarStyle = navBarStyle,
+        isHeroEnabled = isHeroEnabled,
+        profileSwitcherOpen = profileSwitcherOpen,
+        windowWidth = windowWidth,
+        onBrandClick = onBrandClick,
+        trailingContent = trailingContent,
     )
-    val surfaceColor by animateColorAsState(
-        targetValue = if (isFrosted) Color(0xFF1C1C1E).copy(alpha = 0.30f) else Color(0xFF0F0F11).copy(alpha = 0.20f),
-        animationSpec = tween(320, easing = FastOutSlowInEasing),
-        label = "desktop_nav_surface",
-    )
-    val sheenAlpha by animateFloatAsState(
-        targetValue = if (isFrosted) 1f else 0f,
-        animationSpec = tween(320, easing = FastOutSlowInEasing),
-        label = "desktop_nav_sheen",
-    )
-    val glowStrength by animateFloatAsState(
-        targetValue = if (glowEnabled) 1f else 0f,
-        animationSpec = tween(420, easing = NuvioTokens.Motion.standard),
-        label = "desktop_nav_glow",
-    )
-    BoxWithConstraints(
-        modifier = modifier.fillMaxWidth().nuvioTrackTopBarFocus().padding(contentPadding).padding(horizontal = 16.dp),
-        contentAlignment = Alignment.TopCenter,
-    ) {
-        val viewportWidth = windowWidth ?: maxWidth
-        val iconSize = when {
-            viewportWidth < 800.dp -> 26.dp
-            viewportWidth > 1600.dp -> 30.dp
-            else -> 28.dp
-        }
-        val trackWidth = ((iconSize + 20.dp + 64.dp * labelFraction) * items.size + 8.dp).coerceAtMost(maxWidth)
-        JellyNavigationBar(
-            items = items,
-            labelFraction = labelFraction,
-            glowStrength = glowStrength,
-            horizontalLabels = true,
-            iconSize = iconSize,
-            modifier = Modifier.width(trackWidth).height(iconSize + 20.dp).hoverable(interactionSource),
-        ) {
-            Box(
-                modifier = Modifier.matchParentSize()
-                    .clip(RoundedCornerShape(50))
-                    .then(
-                        if (isFrosted && hazeState != null) {
-                            Modifier.hazeEffect(state = hazeState) { blurRadius = 14.dp }
-                        } else {
-                            Modifier
-                        },
-                    )
-                    .background(surfaceColor)
-                    .background(
-                        Brush.verticalGradient(
-                            listOf(
-                                Color.White.copy(alpha = 0.14f * sheenAlpha),
-                                Color.White.copy(alpha = 0.03f * sheenAlpha),
-                                Color.Transparent,
-                            ),
-                        ),
-                    ),
-            )
-        }
-    }
 }
 
 internal fun desktopNavigationLabelFraction(

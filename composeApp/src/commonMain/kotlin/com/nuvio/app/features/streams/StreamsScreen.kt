@@ -31,12 +31,15 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListScope
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.OpenInNew
+import androidx.compose.material.icons.rounded.CheckCircle
 import androidx.compose.material.icons.rounded.ContentCopy
 import androidx.compose.material.icons.rounded.Download
 import androidx.compose.material.icons.rounded.SearchOff
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -91,6 +94,8 @@ import com.nuvio.app.core.ui.withDuplicateSafeLazyKeys
 import com.nuvio.app.core.ui.featherArtwork
 import com.nuvio.app.core.ui.rememberArtworkBackdrop
 import com.nuvio.app.core.ui.platformTouchScroll
+import com.nuvio.app.features.downloads.DownloadItem
+import com.nuvio.app.features.downloads.DownloadStatus
 import com.nuvio.app.features.downloads.DownloadsRepository
 import com.nuvio.app.features.details.MetaScreenSettingsRepository
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -179,17 +184,110 @@ fun StreamsScreen(
     }.collectAsStateWithLifecycle()
     val dominantColorEnabled = isDesktop &&
         metaScreenSettings.backgroundMode == MetaScreenBackgroundMode.DominantColor
-    remember {
+    val downloadsUiState by remember {
         if (AppFeaturePolicy.downloadsEnabled) {
             DownloadsRepository.ensureLoaded()
         }
-    }
+        DownloadsRepository.uiState
+    }.collectAsStateWithLifecycle()
     val isEpisode = seasonNumber != null && episodeNumber != null
     val clipboardManager = LocalClipboardManager.current
     val streamLinkCopiedText = stringResource(Res.string.streams_link_copied)
     val noDirectStreamLinkText = stringResource(Res.string.streams_no_direct_link)
     var streamActionsTarget by remember(videoId) { mutableStateOf<StreamActionsTarget?>(null) }
+    var resolvingDownloadStreamKey by remember(videoId) { mutableStateOf<String?>(null) }
     val downloadScope = rememberCoroutineScope()
+    val currentLogicalDownloadKey = remember(parentMetaId, seasonNumber, episodeNumber) {
+        if (seasonNumber != null && episodeNumber != null) {
+            "${parentMetaId.trim()}|$seasonNumber|$episodeNumber"
+        } else {
+            "${parentMetaId.trim()}|movie"
+        }
+    }
+    val downloadItemForStream: (StreamItem) -> DownloadItem? = { stream ->
+        val directUrl = stream.playableDirectUrl?.trim()
+        downloadsUiState.items.firstOrNull { item ->
+            item.logicalContentKey == currentLogicalDownloadKey && (
+                (!directUrl.isNullOrBlank() && item.sourceUrl == directUrl) ||
+                    (directUrl.isNullOrBlank() && item.streamTitle == stream.streamLabel && item.providerName == stream.addonName)
+                )
+        }
+    }
+    val triggerStreamDownload: (StreamItem) -> Unit = { stream ->
+        val existingDownload = downloadItemForStream(stream)
+        when (existingDownload?.status) {
+            DownloadStatus.Downloading -> {
+                NuvioToastController.show("Download já está em andamento.")
+            }
+            DownloadStatus.Completed -> {
+                NuvioToastController.show("Já disponível offline em Biblioteca → Downloads.")
+            }
+            else -> {
+                val streamKey = streamQuickDownloadKey(stream)
+                if (DirectDebridPlaybackResolver.shouldResolveToPlayableStream(stream)) {
+                    if (resolvingDownloadStreamKey != streamKey) {
+                        resolvingDownloadStreamKey = streamKey
+                        downloadScope.launch {
+                            try {
+                                val resolved = DirectDebridPlaybackResolver.resolveToPlayableStream(
+                                    stream = stream,
+                                    season = seasonNumber,
+                                    episode = episodeNumber,
+                                )
+                                when (resolved) {
+                                    is DirectDebridPlayableResult.Success -> {
+                                        val result = DownloadsRepository.enqueueFromStream(
+                                            contentType = type,
+                                            videoId = videoId,
+                                            parentMetaId = parentMetaId,
+                                            parentMetaType = parentMetaType,
+                                            title = title,
+                                            logo = logo,
+                                            poster = poster,
+                                            background = background,
+                                            seasonNumber = seasonNumber,
+                                            episodeNumber = episodeNumber,
+                                            episodeTitle = episodeTitle,
+                                            episodeThumbnail = episodeThumbnail,
+                                            stream = resolved.stream,
+                                        )
+                                        NuvioToastController.show(result.toastMessage())
+                                    }
+                                    else -> {
+                                        val message = resolved.toastMessage()
+                                        if (message != null) {
+                                            NuvioToastController.show(message)
+                                        }
+                                    }
+                                }
+                            } finally {
+                                if (resolvingDownloadStreamKey == streamKey) {
+                                    resolvingDownloadStreamKey = null
+                                }
+                            }
+                        }
+                    }
+                } else {
+                    val result = DownloadsRepository.enqueueFromStream(
+                        contentType = type,
+                        videoId = videoId,
+                        parentMetaId = parentMetaId,
+                        parentMetaType = parentMetaType,
+                        title = title,
+                        logo = logo,
+                        poster = poster,
+                        background = background,
+                        seasonNumber = seasonNumber,
+                        episodeNumber = episodeNumber,
+                        episodeTitle = episodeTitle,
+                        episodeThumbnail = episodeThumbnail,
+                        stream = stream,
+                    )
+                    NuvioToastController.show(result.toastMessage())
+                }
+            }
+        }
+    }
     var preferredFilterApplied by remember(videoId) { mutableStateOf(false) }
     val episodeProgress = watchProgressUiState.progressForVideo(
         videoId = videoId,
@@ -291,6 +389,9 @@ fun StreamsScreen(
                     streamActionsTarget = StreamActionsTarget(stream = stream, anchorInRoot = position)
                 },
                 onRefresh = reloadStreams,
+                onStreamDownload = if (AppFeaturePolicy.downloadsEnabled) triggerStreamDownload else null,
+                downloadItemForStream = downloadItemForStream,
+                resolvingDownloadStreamKey = resolvingDownloadStreamKey,
             )
         } else {
             MobileStreamsLayout(
@@ -318,6 +419,9 @@ fun StreamsScreen(
                     streamActionsTarget = StreamActionsTarget(stream = stream, anchorInRoot = position)
                 },
                 onRefresh = reloadStreams,
+                onStreamDownload = if (AppFeaturePolicy.downloadsEnabled) triggerStreamDownload else null,
+                downloadItemForStream = downloadItemForStream,
+                resolvingDownloadStreamKey = resolvingDownloadStreamKey,
             )
         }
 
@@ -390,60 +494,7 @@ fun StreamsScreen(
                     NuvioToastController.show(noDirectStreamLinkText)
                 }
             },
-            onDownload = { stream ->
-                if (DirectDebridPlaybackResolver.shouldResolveToPlayableStream(stream)) {
-                    downloadScope.launch {
-                        val resolved = DirectDebridPlaybackResolver.resolveToPlayableStream(
-                            stream = stream,
-                            season = seasonNumber,
-                            episode = episodeNumber,
-                        )
-                        when (resolved) {
-                            is DirectDebridPlayableResult.Success -> {
-                                val result = DownloadsRepository.enqueueFromStream(
-                                    contentType = type,
-                                    videoId = videoId,
-                                    parentMetaId = parentMetaId,
-                                    parentMetaType = parentMetaType,
-                                    title = title,
-                                    logo = logo,
-                                    poster = poster,
-                                    background = background,
-                                    seasonNumber = seasonNumber,
-                                    episodeNumber = episodeNumber,
-                                    episodeTitle = episodeTitle,
-                                    episodeThumbnail = episodeThumbnail,
-                                    stream = resolved.stream,
-                                )
-                                NuvioToastController.show(result.toastMessage())
-                            }
-                            else -> {
-                                val message = resolved.toastMessage()
-                                if (message != null) {
-                                    NuvioToastController.show(message)
-                                }
-                            }
-                        }
-                    }
-                } else {
-                    val result = DownloadsRepository.enqueueFromStream(
-                        contentType = type,
-                        videoId = videoId,
-                        parentMetaId = parentMetaId,
-                        parentMetaType = parentMetaType,
-                        title = title,
-                        logo = logo,
-                        poster = poster,
-                        background = background,
-                        seasonNumber = seasonNumber,
-                        episodeNumber = episodeNumber,
-                        episodeTitle = episodeTitle,
-                        episodeThumbnail = episodeThumbnail,
-                        stream = stream,
-                    )
-                    NuvioToastController.show(result.toastMessage())
-                }
-            },
+            onDownload = triggerStreamDownload,
             onOpen = { stream, openExternally ->
                 onStreamActionOpen(
                     stream,
@@ -476,6 +527,9 @@ private fun MobileStreamsLayout(
     onStreamLongPress: (StreamItem) -> Unit,
     onStreamSecondaryClick: (StreamItem, Offset) -> Unit,
     onRefresh: () -> Unit,
+    onStreamDownload: ((StreamItem) -> Unit)? = null,
+    downloadItemForStream: (StreamItem) -> DownloadItem? = { null },
+    resolvingDownloadStreamKey: String? = null,
     modifier: Modifier = Modifier,
 ) {
     val cinematic = backgroundMode == StreamBackgroundMode.Cinematic && heroArtwork != null
@@ -529,6 +583,9 @@ private fun MobileStreamsLayout(
                     onStreamSecondaryClick = onStreamSecondaryClick,
                     resumePositionMs = resumePositionMs,
                     resumeProgressFraction = resumeProgressFraction,
+                    onStreamDownload = onStreamDownload,
+                    downloadItemForStream = downloadItemForStream,
+                    resolvingDownloadStreamKey = resolvingDownloadStreamKey,
                     modifier = Modifier.weight(1f),
                 )
             }
@@ -773,6 +830,9 @@ internal fun StreamList(
     onStreamSecondaryClick: (StreamItem, Offset) -> Unit,
     resumePositionMs: Long?,
     resumeProgressFraction: Float?,
+    onStreamDownload: ((StreamItem) -> Unit)? = null,
+    downloadItemForStream: (StreamItem) -> DownloadItem? = { null },
+    resolvingDownloadStreamKey: String? = null,
     modifier: Modifier = Modifier,
 ) {
     val filteredGroups = uiState.filteredGroups
@@ -872,6 +932,9 @@ internal fun StreamList(
                             onStreamSecondaryClick = onStreamSecondaryClick,
                             resumePositionMs = resumePositionMs,
                             resumeProgressFraction = resumeProgressFraction,
+                            onStreamDownload = onStreamDownload,
+                            downloadItemForStream = downloadItemForStream,
+                            resolvingDownloadStreamKey = resolvingDownloadStreamKey,
                         )
                     }
                     if (anyLoading) {
@@ -954,6 +1017,9 @@ private fun LazyListScope.streamSection(
     onStreamSecondaryClick: (StreamItem, Offset) -> Unit,
     resumePositionMs: Long?,
     resumeProgressFraction: Float?,
+    onStreamDownload: ((StreamItem) -> Unit)? = null,
+    downloadItemForStream: (StreamItem) -> DownloadItem? = { null },
+    resolvingDownloadStreamKey: String? = null,
 ) {
     val group = section.group
     if (group.streams.isEmpty() && !group.isLoading) return
@@ -992,6 +1058,12 @@ private fun LazyListScope.streamSection(
                 stream.needsLocalDebridResolve &&
                     !AppFeaturePolicy.p2pEnabled &&
                     !(debridEnabled && stream.isAddonDebridCandidate)
+            val canQuickDownload = onStreamDownload != null &&
+                stream.isQuickDownloadable(debridEnabled = debridEnabled)
+            val downloadItem = if (canQuickDownload) downloadItemForStream(stream) else null
+            val isResolvingDownload = canQuickDownload &&
+                resolvingDownloadStreamKey != null &&
+                resolvingDownloadStreamKey == streamQuickDownloadKey(stream)
             StreamCard(
                 stream = stream,
                 enabled = isSelectable || isUnsupportedTorrentStream,
@@ -1016,8 +1088,100 @@ private fun LazyListScope.streamSection(
                         onStreamSecondaryClick(stream, position)
                     }
                 },
+                trailingAction = if (canQuickDownload && onStreamDownload != null) {
+                    {
+                        StreamQuickDownloadButton(
+                            downloadItem = downloadItem,
+                            isResolving = isResolvingDownload,
+                            onClick = { onStreamDownload(stream) },
+                        )
+                    }
+                } else {
+                    null
+                },
             )
             Spacer(modifier = Modifier.height(10.dp))
+        }
+    }
+}
+
+private fun streamQuickDownloadKey(stream: StreamItem): String =
+    stream.playableDirectUrl?.trim()?.takeIf { it.isNotBlank() }
+        ?: stream.infoHash?.trim()?.takeIf { it.isNotBlank() }
+        ?: stream.clientResolve?.infoHash?.trim()?.takeIf { it.isNotBlank() }
+        ?: "${stream.addonId}|${stream.streamLabel}|${stream.streamSubtitle.orEmpty()}"
+
+private fun StreamItem.isQuickDownloadable(debridEnabled: Boolean): Boolean {
+    if (!AppFeaturePolicy.downloadsEnabled) return false
+    if (DownloadsRepository.isSupportedDownloadUrl(playableDirectUrl)) return true
+    return debridEnabled && DirectDebridPlaybackResolver.shouldResolveToPlayableStream(this)
+}
+
+@Composable
+private fun StreamQuickDownloadButton(
+    downloadItem: DownloadItem?,
+    isResolving: Boolean,
+    onClick: () -> Unit,
+) {
+    val status = downloadItem?.status
+    val isCompleted = status == DownloadStatus.Completed
+    val isDownloading = status == DownloadStatus.Downloading || isResolving
+    val containerColor = when {
+        isCompleted -> Color(0xFF16A34A).copy(alpha = 0.20f)
+        isDownloading -> MaterialTheme.colorScheme.primary.copy(alpha = 0.20f)
+        else -> Color.White.copy(alpha = 0.08f)
+    }
+    val borderColor = when {
+        isCompleted -> Color(0xFF4ADE80).copy(alpha = 0.48f)
+        isDownloading -> MaterialTheme.colorScheme.primary.copy(alpha = 0.50f)
+        else -> Color.White.copy(alpha = 0.14f)
+    }
+    val downloadLabel = stringResource(Res.string.streams_download_file)
+
+    Box(
+        modifier = Modifier
+            .size(36.dp)
+            .clip(CircleShape)
+            .background(containerColor)
+            .border(width = 1.dp, color = borderColor, shape = CircleShape)
+            .clickable(onClick = onClick),
+        contentAlignment = Alignment.Center,
+    ) {
+        when {
+            isDownloading -> {
+                val progress = downloadItem?.progressFraction ?: 0f
+                if (!isResolving && progress > 0f && progress < 1f) {
+                    CircularProgressIndicator(
+                        progress = { progress },
+                        modifier = Modifier.size(18.dp),
+                        strokeWidth = 2.dp,
+                        color = MaterialTheme.colorScheme.primary,
+                        trackColor = Color.White.copy(alpha = 0.16f),
+                    )
+                } else {
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(18.dp),
+                        strokeWidth = 2.dp,
+                        color = MaterialTheme.colorScheme.primary,
+                    )
+                }
+            }
+            isCompleted -> {
+                Icon(
+                    imageVector = Icons.Rounded.CheckCircle,
+                    contentDescription = downloadLabel,
+                    tint = Color(0xFF4ADE80),
+                    modifier = Modifier.size(18.dp),
+                )
+            }
+            else -> {
+                Icon(
+                    imageVector = Icons.Rounded.Download,
+                    contentDescription = downloadLabel,
+                    tint = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.88f),
+                    modifier = Modifier.size(18.dp),
+                )
+            }
         }
     }
 }

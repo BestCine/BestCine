@@ -79,6 +79,7 @@ internal fun StreamCard(
     isCurrent: Boolean = false,
     currentLabel: String? = null,
     outlined: Boolean = false,
+    trailingAction: (@Composable () -> Unit)? = null,
 ) {
     val partyLabel = if (isCurrent) null else LocalStreamHighlight.current(stream)
     val cardShape = RoundedCornerShape(12.dp)
@@ -218,6 +219,11 @@ internal fun StreamCard(
                     overflow = TextOverflow.Ellipsis,
                 )
             }
+        }
+
+        if (trailingAction != null) {
+            Spacer(modifier = Modifier.width(10.dp))
+            trailingAction()
         }
     }
 }

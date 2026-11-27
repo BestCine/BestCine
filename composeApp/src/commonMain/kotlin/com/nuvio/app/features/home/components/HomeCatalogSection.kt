@@ -6,7 +6,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.Dp
-import com.nuvio.app.core.ui.NuvioShelfSection
+import com.nuvio.app.core.ui.NuvioShelfSectionIndexed
 import com.nuvio.app.core.ui.NuvioViewAllPillSize
 import com.nuvio.app.core.ui.rememberPosterCardStyleUiState
 import com.nuvio.app.isDesktop
@@ -70,7 +70,7 @@ private fun HomeCatalogRowSectionContent(
 ) {
     val posterCardStyle = rememberPosterCardStyleUiState()
 
-    NuvioShelfSection(
+    NuvioShelfSectionIndexed(
         title = section.title,
         entries = entries,
         modifier = modifier,
@@ -80,7 +80,7 @@ private fun HomeCatalogRowSectionContent(
         onTitleClick = onViewAllClick?.takeIf { isDesktop },
         viewAllPillSize = NuvioViewAllPillSize.Compact,
         key = { item -> item.stableKey() },
-    ) { item ->
+    ) { index, item ->
         HomePosterCard(
             item = item,
             useLandscapeBackdropMode = posterCardStyle.catalogLandscapeModeEnabled,
@@ -89,6 +89,8 @@ private fun HomeCatalogRowSectionContent(
                 item = item,
                 fullyWatchedSeriesKeys = fullyWatchedSeriesKeys,
             ),
+            sectionTitle = section.title,
+            rankPosition = index + 1,
             onClick = onPosterClick?.let { { it(item) } },
             onLongClick = onPosterLongClick?.let { { it(item) } },
         )

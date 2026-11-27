@@ -19,7 +19,7 @@ internal object BestCineHmacSigner {
 
         val version = AppVersionConfig.VERSION_NAME.ifBlank {
             AppVersionConfig.DESKTOP_VERSION_NAME
-        }.ifBlank { "1.1.13" }
+        }.ifBlank { "1.1.14" }
 
         val headers = linkedMapOf(
             "X-BestCine-Client" to "BestCine/$version",

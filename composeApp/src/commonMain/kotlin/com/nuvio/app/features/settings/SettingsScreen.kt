@@ -931,77 +931,93 @@ private fun TabletSettingsScreen(
     Row(modifier = Modifier.fillMaxSize()) {
         Surface(
             modifier = Modifier
-                .width(280.dp)
+                .width(268.dp)
                 .fillMaxSize(),
-            color = MaterialTheme.colorScheme.surface,
+            color = MaterialTheme.colorScheme.surface.copy(alpha = 0.88f),
         ) {
-            Column(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(top = topOffset),
-            ) {
-                Text(
-                    text = stringResource(Res.string.compose_settings_page_root),
+            Box(modifier = Modifier.fillMaxSize()) {
+                Column(
                     modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 24.dp)
-                        .padding(bottom = 20.dp),
-                    style = MaterialTheme.typography.headlineLarge,
-                    color = MaterialTheme.colorScheme.onSurface,
-                    fontWeight = FontWeight.Bold,
-                    maxLines = 1,
-                    softWrap = false,
-                )
-                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
-
-                Spacer(modifier = Modifier.height(10.dp))
-                val isBestCineCatalogsSelected = page == SettingsPage.BestCineCatalogs
-                SettingsCategory.entries.forEach { category ->
-                    SettingsSidebarItem(
-                        label = stringResource(category.labelRes),
-                        icon = category.icon,
-                        selected = !isBestCineCatalogsSelected && category == activeCategory,
-                        onClick = {
-                            selectedCategory = category.name
-                            if (page != SettingsPage.Root) {
-                                onPageChange(SettingsPage.Root)
-                            }
-                        },
+                        .fillMaxSize()
+                        .padding(top = topOffset),
+                ) {
+                    Text(
+                        text = stringResource(Res.string.compose_settings_page_root),
                         modifier = Modifier
-                            .focusProperties {
-                                if (category == SettingsCategory.entries.first()) {
-                                    up = FocusRequester.Cancel
-                                }
-                                right = ContentEntry.requester
-                            }
-                            .then(
-                                if (!isBestCineCatalogsSelected && category == activeCategory) {
-                                    Modifier.focusRequester(categoryEntryRequester)
-                                } else {
-                                    Modifier
-                                },
-                            ),
+                            .fillMaxWidth()
+                            .padding(horizontal = 22.dp),
+                        style = MaterialTheme.typography.headlineLarge,
+                        color = MaterialTheme.colorScheme.onSurface,
+                        fontWeight = FontWeight.Bold,
+                        maxLines = 1,
+                        softWrap = false,
                     )
-                    if (category == SettingsCategory.You) {
-                        BestCineCatalogsSidebarItem(
-                            selected = isBestCineCatalogsSelected,
+                    Text(
+                        text = "Preferências do BestCine",
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 22.dp)
+                            .padding(top = 2.dp, bottom = 16.dp),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1,
+                    )
+                    HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.45f))
+
+                    Spacer(modifier = Modifier.height(10.dp))
+                    val isBestCineCatalogsSelected = page == SettingsPage.BestCineCatalogs
+                    SettingsCategory.entries.forEach { category ->
+                        SettingsSidebarItem(
+                            label = stringResource(category.labelRes),
+                            icon = category.icon,
+                            selected = !isBestCineCatalogsSelected && category == activeCategory,
                             onClick = {
-                                onPageChange(SettingsPage.BestCineCatalogs)
+                                selectedCategory = category.name
+                                if (page != SettingsPage.Root) {
+                                    onPageChange(SettingsPage.Root)
+                                }
                             },
                             modifier = Modifier
                                 .focusProperties {
+                                    if (category == SettingsCategory.entries.first()) {
+                                        up = FocusRequester.Cancel
+                                    }
                                     right = ContentEntry.requester
                                 }
                                 .then(
-                                    if (isBestCineCatalogsSelected) {
+                                    if (!isBestCineCatalogsSelected && category == activeCategory) {
                                         Modifier.focusRequester(categoryEntryRequester)
                                     } else {
                                         Modifier
                                     },
                                 ),
                         )
+                        if (category == SettingsCategory.You) {
+                            BestCineCatalogsSidebarItem(
+                                selected = isBestCineCatalogsSelected,
+                                onClick = {
+                                    onPageChange(SettingsPage.BestCineCatalogs)
+                                },
+                                modifier = Modifier
+                                    .focusProperties {
+                                        right = ContentEntry.requester
+                                    }
+                                    .then(
+                                        if (isBestCineCatalogsSelected) {
+                                            Modifier.focusRequester(categoryEntryRequester)
+                                        } else {
+                                            Modifier
+                                        },
+                                    ),
+                            )
+                        }
                     }
                 }
+                androidx.compose.material3.VerticalDivider(
+                    modifier = Modifier.align(Alignment.CenterEnd),
+                    thickness = 1.dp,
+                    color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f),
+                )
             }
         }
 

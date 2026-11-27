@@ -858,7 +858,7 @@
     <string name="settings_content_discovery_recent_searches_description">Salva buscas recentes e as exibe quando a barra de busca estiver em foco.</string>
     <string name="settings_content_discovery_addons_description">Instale, remova, atualize e ordene suas fontes de conteúdo.</string>
     <string name="settings_content_discovery_addons_description_appstore">Adicione e gerencie os addons que você usa com o Nuvio.</string>
-    <string name="settings_content_discovery_plugins_description">Instale repositórios de scraper JavaScript e teste provedores internamente.</string>
+    <string name="settings_content_discovery_plugins_description">Instale repositórios de extensões JavaScript e teste fontes internamente.</string>
     <string name="settings_content_discovery_homescreen_description">Ajuste layout da página inicial, visibilidade de conteúdo e comportamento de pôsteres</string>
     <string name="settings_content_discovery_meta_screen_description">Configurações para as telas de detalhes e episódios.</string>
     <string name="settings_content_discovery_collections_description">Crie agrupamentos personalizados de catálogos com pastas exibidas na Página Inicial.</string>
@@ -1702,7 +1702,7 @@
     <string name="profile_already_active">Você já está em "%1$s"</string>
     <string name="provider_downloaded">Baixado</string>
     <string name="resume_prompt_action">Retomar</string>
-    <string name="streams_active_scrapers">Scrapers ativos</string>
+    <string name="streams_active_scrapers">Fontes ativas</string>
     <string name="streams_checking_more_addons">Verificando mais addons…</string>
     <string name="streams_copy_link">Copiar link da stream</string>
     <string name="streams_download_file">Baixar arquivo</string>

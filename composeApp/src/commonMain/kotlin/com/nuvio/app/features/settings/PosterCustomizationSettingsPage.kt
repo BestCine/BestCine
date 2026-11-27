@@ -168,12 +168,14 @@ internal fun LazyListScope.posterCustomizationSettingsContent(
                     cornerRadiusDp = uiState.cornerRadiusDp,
                     catalogLandscapeModeEnabled = uiState.catalogLandscapeModeEnabled,
                     hideLabelsEnabled = uiState.hideLabelsEnabled,
+                    nativePosterBadgesEnabled = uiState.nativePosterBadgesEnabled,
                     alwaysShowLandscapeClearlogo = uiState.alwaysShowLandscapeClearlogo,
                     animatedArtworkMode = uiState.animatedArtworkMode,
                     onWidthSelected = PosterCardStyleRepository::setWidthDp,
                     onCornerRadiusSelected = PosterCardStyleRepository::setCornerRadiusDp,
                     onCatalogLandscapeModeChange = PosterCardStyleRepository::setCatalogLandscapeModeEnabled,
                     onHideLabelsChange = PosterCardStyleRepository::setHideLabelsEnabled,
+                    onNativePosterBadgesChange = PosterCardStyleRepository::setNativePosterBadgesEnabled,
                     onAlwaysShowLandscapeClearlogoChange = PosterCardStyleRepository::setAlwaysShowLandscapeClearlogo,
                     onAnimatedArtworkModeSelected = PosterCardStyleRepository::setAnimatedArtworkMode,
                 )
@@ -727,12 +729,14 @@ private fun PosterCardStyleControls(
     cornerRadiusDp: Int,
     catalogLandscapeModeEnabled: Boolean,
     hideLabelsEnabled: Boolean,
+    nativePosterBadgesEnabled: Boolean,
     alwaysShowLandscapeClearlogo: Boolean,
     animatedArtworkMode: AnimatedArtworkMode,
     onWidthSelected: (Int) -> Unit,
     onCornerRadiusSelected: (Int) -> Unit,
     onCatalogLandscapeModeChange: (Boolean) -> Unit,
     onHideLabelsChange: (Boolean) -> Unit,
+    onNativePosterBadgesChange: (Boolean) -> Unit,
     onAlwaysShowLandscapeClearlogoChange: (Boolean) -> Unit,
     onAnimatedArtworkModeSelected: (AnimatedArtworkMode) -> Unit,
 ) {
@@ -792,6 +796,11 @@ private fun PosterCardStyleControls(
             title = stringResource(Res.string.settings_poster_hide_labels),
             checked = hideLabelsEnabled,
             onCheckedChange = onHideLabelsChange,
+        )
+        PosterToggleRow(
+            title = "Selos nativos nos pôsteres",
+            checked = nativePosterBadgesEnabled,
+            onCheckedChange = onNativePosterBadgesChange,
         )
         PosterToggleRow(
             title = stringResource(Res.string.settings_poster_always_show_landscape_clearlogo),

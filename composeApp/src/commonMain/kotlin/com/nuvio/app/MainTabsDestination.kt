@@ -8,21 +8,35 @@ import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideOutHorizontally
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsHoveredAsState
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.asPaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBars
 import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.rounded.LiveTv
+import androidx.compose.material.icons.rounded.Settings
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Text
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.sp
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
@@ -42,7 +56,12 @@ import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.max
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.nuvio.app.bestcine.BestCineAccountRepository
+import com.nuvio.app.bestcine.BestCineBranding
 import com.nuvio.app.bestcine.tv.BestCineTvRepository
+import com.nuvio.app.core.ui.BestCineDesktopTopBarHeight
+import com.nuvio.app.core.ui.FullscreenActionButton
+import com.nuvio.app.core.ui.isFullscreenActionSupported
 import com.nuvio.app.core.ui.LocalNuvioBottomNavigationOverlayPadding
 import com.nuvio.app.core.ui.LocalNuvioNavBarScrollState
 import com.nuvio.app.core.ui.NuvioNavBarScrollState
@@ -54,7 +73,10 @@ import com.nuvio.app.core.ui.PlatformBackHandler
 import com.nuvio.app.core.ui.rememberNuvioNavBarScrollState
 import com.nuvio.app.features.home.HomeCatalogSettingsRepository
 import com.nuvio.app.features.player.rememberIsInPictureInPicture
+import com.nuvio.app.features.profiles.ActiveProfileMiniAvatar
+import com.nuvio.app.features.profiles.AvatarRepository
 import com.nuvio.app.features.profiles.NuvioProfile
+import com.nuvio.app.features.profiles.ProfileRepository
 import com.nuvio.app.features.profiles.ProfileSwitcherTab
 import com.nuvio.app.features.settings.DesktopNavigationLayout
 import com.nuvio.app.features.settings.NavBarStyle
@@ -110,7 +132,7 @@ internal fun MainTabsDestination(
         val topChromePadding = if (useFloatingTopBar || useDesktopTopBar) {
             val statusBarPadding = WindowInsets.statusBars.asPaddingValues().calculateTopPadding()
             if (useDesktopTopBar) {
-                statusBarPadding + 48.dp + 64.dp
+                statusBarPadding + BestCineDesktopTopBarHeight + 6.dp
             } else {
                 max(statusBarPadding + 24.dp, 48.dp) + 64.dp
             }
@@ -272,7 +294,7 @@ internal fun MainTabsDestination(
                     navBarStyleSetting == NavBarStyle.ADAPTIVE
                 }
                 CompositionLocalProvider(
-                    LocalNuvioBottomNavigationOverlayPadding provides if (useNativeBottomTabs) 49.dp else if (!isDesktop && !isTabletLayout && navBarStyleSetting != NavBarStyle.CLASSIC) 72.dp else 0.dp,
+                    LocalNuvioBottomNavigationOverlayPadding provides if (useNativeBottomTabs) 49.dp else if (!isDesktop && !isTabletLayout && navBarStyleSetting != NavBarStyle.CLASSIC) 76.dp else 0.dp,
                     LocalNuvioNavBarScrollState provides navBarScrollState,
                 ) {
                     AppTabHost(
@@ -326,13 +348,41 @@ internal fun MainTabsDestination(
                 }
 
                 if (useDesktopTopBar && !isBestCineTvFullscreen) {
-                    DesktopNavigationBar(
-                        items = floatingNavigationItems,
-                        modifier = Modifier.align(Alignment.TopCenter),
-                        contentPadding = PaddingValues(
-                            top = WindowInsets.statusBars.asPaddingValues().calculateTopPadding() + 10.dp,
-                            bottom = 8.dp,
+                    val desktopTopBarItems = listOf(
+                        FloatingNavigationItem(
+                            selected = selectedTab == AppScreenTab.Home,
+                            onClick = { onTabSelected(AppScreenTab.Home) },
+                            icon = Icons.Filled.Home,
+                            label = stringResource(Res.string.compose_nav_home),
                         ),
+                        FloatingNavigationItem(
+                            selected = selectedTab == AppScreenTab.Tv,
+                            onClick = { onTabSelected(AppScreenTab.Tv) },
+                            icon = Icons.Rounded.LiveTv,
+                            label = "TV",
+                        ),
+                        FloatingNavigationItem(
+                            selected = selectedTab == AppScreenTab.Search,
+                            onClick = { onTabSelected(AppScreenTab.Search) },
+                            drawable = Res.drawable.sidebar_search,
+                            label = stringResource(Res.string.compose_nav_search),
+                        ),
+                        FloatingNavigationItem(
+                            selected = selectedTab == AppScreenTab.Library,
+                            onClick = { onTabSelected(AppScreenTab.Library) },
+                            drawable = Res.drawable.sidebar_library,
+                            label = stringResource(Res.string.compose_nav_library),
+                        ),
+                        FloatingNavigationItem(
+                            selected = selectedTab == AppScreenTab.Settings,
+                            onClick = { onTabSelected(AppScreenTab.Settings) },
+                            icon = Icons.Rounded.Settings,
+                            label = stringResource(Res.string.compose_nav_settings),
+                        ),
+                    )
+                    DesktopNavigationBar(
+                        items = desktopTopBarItems,
+                        modifier = Modifier.align(Alignment.TopCenter),
                         scrollState = navBarScrollState,
                         hazeState = navBarHazeState,
                         navBarStyle = navBarStyleSetting,
@@ -340,6 +390,30 @@ internal fun MainTabsDestination(
                         profileSwitcherOpen = isTopProfileSwitcherOpen,
                         windowWidth = screenWidth,
                         glowEnabled = navBarGlowEnabled,
+                        onBrandClick = { onTabSelected(AppScreenTab.Home) },
+                        trailingContent = {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                            ) {
+                                if (isFullscreenActionSupported) {
+                                    FullscreenActionButton(
+                                        buttonSize = 36.dp,
+                                        iconSize = 18.dp,
+                                        containerColor = Color.White.copy(alpha = 0.08f),
+                                        contentColor = Color.White,
+                                    )
+                                }
+                                BestCineTopBarProfileButton(
+                                    selected = isTopProfileSwitcherOpen,
+                                    onProfileSelected = onProfileSelected,
+                                    onAddProfileRequested = onAddProfileRequested,
+                                    hazeState = navBarHazeState,
+                                    onPopupStateChanged = { isTopProfileSwitcherOpen = it },
+                                    compact = screenWidth < 960.dp,
+                                )
+                            }
+                        },
                     )
                 }
 
@@ -360,4 +434,116 @@ internal fun MainTabsDestination(
             }
         }
     }
+}
+
+@Composable
+private fun BestCineTopBarProfileButton(
+    selected: Boolean,
+    onProfileSelected: (NuvioProfile) -> Unit,
+    onAddProfileRequested: () -> Unit,
+    hazeState: dev.chrisbanes.haze.HazeState?,
+    onPopupStateChanged: (Boolean) -> Unit,
+    compact: Boolean,
+) {
+    val profileState by ProfileRepository.state.collectAsStateWithLifecycle()
+    val avatars by AvatarRepository.avatars.collectAsStateWithLifecycle()
+    val bestCineState by BestCineAccountRepository.state.collectAsStateWithLifecycle()
+    val activeProfile = profileState.activeProfile
+    val profileName = activeProfile?.name?.takeIf { it.isNotBlank() }
+        ?: stringResource(Res.string.compose_nav_profile)
+    val bestCineUser = bestCineState.session?.user
+    val isVip = bestCineUser?.isApoiadorOrVip == true
+    val planBadgeText = bestCineUser?.planShortBadge ?: "Gratuito"
+    val goldColor = Color(0xFFFFCA28)
+    val chipShape = RoundedCornerShape(999.dp)
+
+    ProfileSwitcherTab(
+        selected = selected,
+        onClick = {},
+        onProfileSelected = onProfileSelected,
+        onAddProfileRequested = onAddProfileRequested,
+        openPopupOnClick = true,
+        hazeState = hazeState,
+        onPopupStateChanged = onPopupStateChanged,
+        popupBelowAnchor = true,
+        triggerContent = { isOpen ->
+            Row(
+                modifier = Modifier
+                    .clip(chipShape)
+                    .background(
+                        when {
+                            isOpen -> BestCineBranding.PrimaryBlue.copy(alpha = 0.24f)
+                            isVip -> goldColor.copy(alpha = 0.10f)
+                            else -> Color.White.copy(alpha = 0.06f)
+                        },
+                    )
+                    .border(
+                        width = 1.dp,
+                        color = when {
+                            isOpen -> BestCineBranding.PrimaryBlueBright.copy(alpha = 0.65f)
+                            isVip -> goldColor.copy(alpha = 0.36f)
+                            else -> Color.White.copy(alpha = 0.12f)
+                        },
+                        shape = chipShape,
+                    )
+                    .padding(
+                        start = 4.dp,
+                        end = if (compact) 4.dp else 12.dp,
+                        top = 4.dp,
+                        bottom = 4.dp,
+                    ),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                Box(
+                    modifier = if (isVip) {
+                        Modifier
+                            .size(32.dp)
+                            .clip(CircleShape)
+                            .background(goldColor.copy(alpha = 0.22f))
+                            .padding(2.dp)
+                    } else {
+                        Modifier
+                    },
+                    contentAlignment = Alignment.Center,
+                ) {
+                    ActiveProfileMiniAvatar(
+                        profile = activeProfile,
+                        avatars = avatars,
+                        selected = isVip || isOpen,
+                        size = 28,
+                    )
+                }
+                if (!compact) {
+                    Column(
+                        verticalArrangement = Arrangement.Center,
+                    ) {
+                        Text(
+                            text = profileName,
+                            color = Color.White,
+                            fontSize = 12.sp,
+                            lineHeight = 14.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.widthIn(max = 110.dp),
+                        )
+                        val displayPlanBadge = if (isVip && !planBadgeText.contains("👑") && !planBadgeText.contains("⭐")) {
+                            "👑 $planBadgeText"
+                        } else {
+                            planBadgeText
+                        }
+                        Text(
+                            text = displayPlanBadge,
+                            color = if (isVip) goldColor else Color(0xFF94A3B8),
+                            fontSize = 10.sp,
+                            lineHeight = 12.sp,
+                            fontWeight = if (isVip) FontWeight.SemiBold else FontWeight.Normal,
+                            maxLines = 1,
+                        )
+                    }
+                }
+            }
+        },
+    )
 }

@@ -57,7 +57,7 @@ object NuvioTokens {
         val xxl = Space.s24
         val full = 999.dp
 
-        val card = xxl
+        val card = xl
         val compactCard = lg
         val sheet = xxl
         val dialog = Space.s28
@@ -378,8 +378,8 @@ internal fun defaultNuvioThemeTokens(
     val surfaceCard = palette.backgroundCard
     val accent = palette.secondary
     val accentStrong = palette.secondaryVariant
-    val borderSubtle = Color(0xFF252A2A).copy(alpha = 0.55f)
-    val borderDefault = Color(0xFF252A2A)
+    val borderSubtle = Color(0xFF22314A).copy(alpha = 0.65f)
+    val borderDefault = Color(0xFF263754)
     val overlayScrim = Color.Black.copy(alpha = NuvioTokens.Opacity.overlayMedium)
 
     return NuvioThemeTokens(

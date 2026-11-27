@@ -77,17 +77,17 @@ object ThemeColors {
     )
 
     val ArcticBlue = ThemeColorPalette(
-        secondary = Color(0xFF3185F5),
-        secondaryVariant = Color(0xFF4D55E8),
-        accentGradient = listOf(Color(0xFF4DE3FF), Color(0xFF3185F5), Color(0xFF4D55E8)),
-        nativeAccentHex = "#4DE3FF",
+        secondary = Color(0xFF1E6BFF),
+        secondaryVariant = Color(0xFF3B82F6),
+        accentGradient = listOf(Color(0xFF4299FF), Color(0xFF1E6BFF), Color(0xFF2563EB)),
+        nativeAccentHex = "#4299FF",
         onSecondary = Color.White,
         onSecondaryVariant = Color.White,
-        focusRing = Color(0xFF4DE3FF),
-        focusBackground = Color(0xFF172844),
-        background = Color(0xFF0B0E14),
-        backgroundElevated = Color(0xFF141A24),
-        backgroundCard = Color(0xFF161E2A),
+        focusRing = Color(0xFF4299FF),
+        focusBackground = Color(0xFF13264A),
+        background = Color(0xFF070B14),
+        backgroundElevated = Color(0xFF0D1422),
+        backgroundCard = Color(0xFF121C2E),
     )
 
     val Graphite = ThemeColorPalette(

@@ -646,7 +646,7 @@
     <string name="settings_content_discovery_section_sources">FONTES</string>
     <string name="settings_content_discovery_addons_description">Instala, remove, atualiza e ordena as tuas fontes de conteúdo.</string>
     <string name="settings_content_discovery_addons_description_appstore">Adiciona e gere os addons que usas com o Nuvio.</string>
-    <string name="settings_content_discovery_plugins_description">Instala repositórios de scrapers JavaScript e testa fornecedores internamente.</string>
+    <string name="settings_content_discovery_plugins_description">Instala repositórios de extensões JavaScript e testa fontes internamente.</string>
     <string name="settings_content_discovery_homescreen_description">Ajusta o esquema da página inicial, a visibilidade do conteúdo e o comportamento dos cartazes.</string>
     <string name="settings_content_discovery_meta_screen_description">Definições para as páginas de detalhes e de episódios.</string>
     <string name="settings_content_discovery_collections_description">Cria agrupamentos personalizados de catálogos com pastas apresentadas no Início.</string>
@@ -1282,7 +1282,7 @@
     <string name="profile_who_is_watching">Quem está a ver?</string>
     <string name="provider_downloaded">Transferido</string>
     <string name="resume_prompt_action">Retomar</string>
-    <string name="streams_active_scrapers">Scrapers ativos</string>
+    <string name="streams_active_scrapers">Fontes ativas</string>
     <string name="streams_checking_more_addons">A verificar mais addons…</string>
     <string name="streams_copy_link">Copiar link do stream</string>
     <string name="streams_download_file">Transferir ficheiro</string>

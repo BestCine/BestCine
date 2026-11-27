@@ -16,6 +16,9 @@ import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
@@ -86,6 +89,7 @@ import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -95,7 +99,10 @@ import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -117,24 +124,45 @@ import com.nuvio.app.core.ui.isFullscreenActionActive
 import com.nuvio.app.core.ui.isFullscreenActionSupported
 import com.nuvio.app.core.ui.nuvio
 import com.nuvio.app.core.ui.toggleFullscreenAction
+import com.nuvio.app.features.player.GestureFeedbackIcon
+import com.nuvio.app.features.player.GestureFeedbackState
 import com.nuvio.app.features.player.HidePlayerSystemBars
 import com.nuvio.app.features.player.LockPlayerToLandscape
 import com.nuvio.app.features.player.LockPlayerToPortrait
 import com.nuvio.app.features.player.ManagePlayerPictureInPicture
 import com.nuvio.app.features.player.PlatformPlayerSurface
+import com.nuvio.app.features.player.PlayerAudioLevel
 import com.nuvio.app.features.player.PlayerControlsAction
 import com.nuvio.app.features.player.PlayerControlsState
 import com.nuvio.app.features.player.PlayerEngineController
+import com.nuvio.app.features.player.PlayerGestureOverlay
 import com.nuvio.app.features.player.PlayerLaunch
+import com.nuvio.app.features.player.PlayerLeftGestureBoundary
 import com.nuvio.app.features.player.PlayerPlaybackSnapshot
 import com.nuvio.app.features.player.PlayerResizeMode
+import com.nuvio.app.features.player.PlayerRightGestureBoundary
+import com.nuvio.app.features.player.PlayerSettingsRepository
+import com.nuvio.app.features.player.PlayerSideGesture
+import com.nuvio.app.features.player.PlayerSideGestureSystemEdgeExclusion
+import com.nuvio.app.features.player.PlayerVerticalGestureDominanceRatio
+import com.nuvio.app.features.player.PlayerVerticalGestureMinHeightFraction
+import com.nuvio.app.features.player.PlayerVerticalGestureSensitivity
+import com.nuvio.app.features.player.PlayerVerticalGestureTouchSlopMultiplier
 import com.nuvio.app.features.player.rememberIsInPictureInPicture
+import com.nuvio.app.features.player.rememberPlayerGestureController
 import com.nuvio.app.features.player.sanitizePlaybackHeaders
 import com.nuvio.app.features.player.sanitizePlaybackResponseHeaders
 import com.nuvio.app.features.player.togglePlayerPictureInPicture
 import com.nuvio.app.features.streams.StreamItem
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import nuvio.composeapp.generated.resources.Res
+import nuvio.composeapp.generated.resources.compose_player_brightness_level
+import nuvio.composeapp.generated.resources.compose_player_muted
+import nuvio.composeapp.generated.resources.compose_player_volume_level
+import kotlin.math.abs
+import kotlin.math.roundToInt
 
 @Composable
 internal fun BestCineTvScreen(
@@ -369,7 +397,7 @@ internal fun BestCineTvScreen(
         label = "tv_content_horizontal_padding",
     )
     val animatedContentVerticalPadding by animateDpAsState(
-        targetValue = if (isFullscreen) 0.dp else 12.dp,
+        targetValue = if (isFullscreen) 0.dp else 8.dp,
         animationSpec = tween(durationMillis = 220, easing = FastOutSlowInEasing),
         label = "tv_content_vertical_padding",
     )
@@ -572,8 +600,9 @@ internal fun BestCineTvScreen(
                             }
                         }
 
-                    // Banner de status / proteção anti-zapping
-                    uiState.bannerMessage?.let { msg ->
+                    // Banner de aviso/erro (nunca empurra o layout durante "Sintonizando...")
+                    val topAlertMessage = uiState.bannerMessage?.takeIf { uiState.openingChannelId == null }
+                    topAlertMessage?.let { msg ->
                         Spacer(modifier = Modifier.height(10.dp))
                         Surface(
                             shape = RoundedCornerShape(10.dp),
@@ -597,33 +626,28 @@ internal fun BestCineTvScreen(
                                 verticalAlignment = Alignment.CenterVertically,
                                 horizontalArrangement = Arrangement.spacedBy(10.dp),
                             ) {
-                                if (uiState.openingChannelId != null) {
-                                    NuvioLoadingIndicator(size = 15.dp, color = BestCineBranding.PrimaryBlueBright)
-                                }
                                 Text(
                                     text = msg,
                                     style = MaterialTheme.typography.bodySmall,
                                     color = if (uiState.isBannerError) tokens.colors.danger else tokens.colors.textPrimary,
                                     modifier = Modifier.weight(1f),
                                 )
-                                if (uiState.openingChannelId == null) {
-                                    IconButton(
-                                        onClick = BestCineTvRepository::clearBanner,
-                                        modifier = Modifier.size(22.dp),
-                                    ) {
-                                        Icon(
-                                            imageVector = Icons.Rounded.Close,
-                                            contentDescription = "Fechar aviso",
-                                            tint = tokens.colors.textMuted,
-                                            modifier = Modifier.size(15.dp),
-                                        )
-                                    }
+                                IconButton(
+                                    onClick = BestCineTvRepository::clearBanner,
+                                    modifier = Modifier.size(22.dp),
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Rounded.Close,
+                                        contentDescription = "Fechar aviso",
+                                        tint = tokens.colors.textMuted,
+                                        modifier = Modifier.size(15.dp),
+                                    )
                                 }
                             }
                         }
                     }
 
-                    Spacer(modifier = Modifier.height(12.dp))
+                    Spacer(modifier = Modifier.height(10.dp))
                 }
             }
 
@@ -690,6 +714,9 @@ internal fun BestCineTvScreen(
                         activeEpgDetails = uiState.activeEpgDetails,
                         isLoadingEpg = uiState.isLoadingEpg,
                         openingChannelId = uiState.openingChannelId,
+                        openingChannelName = uiState.openingChannelId?.let { id ->
+                            uiState.channels.firstOrNull { it.id == id }?.name
+                        },
                         onSelectChannel = ::selectChannel,
                         onToggleFavoriteChannel = BestCineTvRepository::toggleFavoriteChannel,
                         onSelectSourceIndex = BestCineTvRepository::selectActiveStreamIndex,
@@ -724,23 +751,62 @@ internal fun BestCineTvScreen(
                     // ============================================================
                     // MODO GRADE COMPACTA (ESTILO IPTV)
                     // ============================================================
-                    LazyVerticalGrid(
-                        columns = GridCells.Adaptive(minSize = if (isCompactMobile) 140.dp else 158.dp),
-                        modifier = Modifier.fillMaxSize(),
-                        contentPadding = PaddingValues(bottom = if (isCompactMobile) 92.dp else 24.dp),
-                        horizontalArrangement = Arrangement.spacedBy(10.dp),
-                        verticalArrangement = Arrangement.spacedBy(10.dp),
-                    ) {
-                        items(filteredChannels, key = { it.id }) { channel ->
-                            BestCineTvGridCard(
-                                channel = channel,
-                                epgBrtMinute = epgBrtMinute,
-                                isFavorite = channel.id in uiState.favoriteChannelIds,
-                                isOpening = uiState.openingChannelId == channel.id,
-                                enabled = uiState.openingChannelId == null,
-                                onToggleFavorite = { BestCineTvRepository.toggleFavoriteChannel(channel.id) },
-                                onClick = { selectChannel(channel) },
-                            )
+                    Box(modifier = Modifier.fillMaxSize()) {
+                        LazyVerticalGrid(
+                            columns = GridCells.Adaptive(minSize = if (isCompactMobile) 140.dp else 158.dp),
+                            modifier = Modifier.fillMaxSize(),
+                            contentPadding = PaddingValues(bottom = if (isCompactMobile) 92.dp else 24.dp),
+                            horizontalArrangement = Arrangement.spacedBy(10.dp),
+                            verticalArrangement = Arrangement.spacedBy(10.dp),
+                        ) {
+                            items(filteredChannels, key = { it.id }) { channel ->
+                                BestCineTvGridCard(
+                                    channel = channel,
+                                    epgBrtMinute = epgBrtMinute,
+                                    isFavorite = channel.id in uiState.favoriteChannelIds,
+                                    isOpening = uiState.openingChannelId == channel.id,
+                                    enabled = uiState.openingChannelId == null,
+                                    onToggleFavorite = { BestCineTvRepository.toggleFavoriteChannel(channel.id) },
+                                    onClick = { selectChannel(channel) },
+                                )
+                            }
+                        }
+
+                        val openingGridName = uiState.openingChannelId?.let { id ->
+                            uiState.channels.firstOrNull { it.id == id }?.name
+                        }
+                        androidx.compose.animation.AnimatedVisibility(
+                            visible = uiState.openingChannelId != null,
+                            enter = fadeIn(tween(150)),
+                            exit = fadeOut(tween(180)),
+                            modifier = Modifier
+                                .align(Alignment.BottomCenter)
+                                .padding(bottom = if (isCompactMobile) 92.dp else 20.dp),
+                        ) {
+                            Surface(
+                                shape = RoundedCornerShape(999.dp),
+                                color = Color(0xE60A1120),
+                                border = BorderStroke(1.dp, BestCineBranding.PrimaryBlueBright.copy(alpha = 0.48f)),
+                            ) {
+                                Row(
+                                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 9.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                                ) {
+                                    NuvioLoadingIndicator(size = 16.dp, color = BestCineBranding.PrimaryBlueBright)
+                                    Text(
+                                        text = if (!openingGridName.isNullOrBlank()) {
+                                            "Sintonizando $openingGridName..."
+                                        } else {
+                                            "Sintonizando canal..."
+                                        },
+                                        style = MaterialTheme.typography.labelLarge,
+                                        color = Color.White,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis,
+                                    )
+                                }
+                            }
                         }
                     }
                 }
@@ -762,10 +828,10 @@ private fun BestCineTvCategoriesSidebar(
 
     Column(
         modifier = Modifier
-            .width(248.dp)
+            .width(210.dp)
             .fillMaxHeight()
             .background(Color(0xFF0A0E18))
-            .padding(horizontal = 10.dp, vertical = 12.dp),
+            .padding(horizontal = 10.dp, vertical = 10.dp),
     ) {
         CompactSearchField(
             value = categorySearchQuery,
@@ -829,6 +895,7 @@ private fun BestCineTvSplitPlayerLayout(
     activeEpgDetails: BestCineTvEpgDetails?,
     isLoadingEpg: Boolean,
     openingChannelId: String?,
+    openingChannelName: String? = null,
     onSelectChannel: (BestCineTvChannel) -> Unit,
     onToggleFavoriteChannel: (String) -> Unit,
     onSelectSourceIndex: (Int) -> Unit,
@@ -854,9 +921,14 @@ private fun BestCineTvSplitPlayerLayout(
         BestCineTvRepository.loadChannelEpgDetails(activeChannel)
     }
 
-    var controller by remember(activeChannel.id, sourceUrl) { mutableStateOf<PlayerEngineController?>(null) }
-    var snapshot by remember(activeChannel.id, sourceUrl) { mutableStateOf(PlayerPlaybackSnapshot()) }
-    var playerError by remember(activeChannel.id, sourceUrl) { mutableStateOf<String?>(null) }
+    var playbackRetryNonce by remember(activeChannel.id, sourceUrl) { mutableStateOf(0) }
+    var failedSourceIndices by remember(activeChannel.id) { mutableStateOf(emptySet<Int>()) }
+    var failoverStatusMessage by remember(activeChannel.id) { mutableStateOf<String?>(null) }
+    var hasPlayedCurrentSource by remember(activeChannel.id, sourceUrl, playbackRetryNonce) { mutableStateOf(false) }
+
+    var controller by remember(activeChannel.id, sourceUrl, playbackRetryNonce) { mutableStateOf<PlayerEngineController?>(null) }
+    var snapshot by remember(activeChannel.id, sourceUrl, playbackRetryNonce) { mutableStateOf(PlayerPlaybackSnapshot()) }
+    var playerError by remember(activeChannel.id, sourceUrl, playbackRetryNonce) { mutableStateOf<String?>(null) }
     var isMuted by remember { mutableStateOf(false) }
     var resizeMode by remember { mutableStateOf(PlayerResizeMode.Fit) }
     var playbackSpeed by remember { mutableStateOf(1f) }
@@ -865,6 +937,111 @@ private fun BestCineTvSplitPlayerLayout(
     val isInPip = rememberIsInPictureInPicture()
     val castState by BestCineCastController.state.collectAsStateWithLifecycle()
     var showCastDialog by remember { mutableStateOf(false) }
+
+    fun nextUntriedSourceIndex(excluding: Set<Int>): Int? {
+        if (activeStreams.size <= 1) return null
+        for (offset in 1 until activeStreams.size) {
+            val candidate = (activeStreamIndex + offset) % activeStreams.size
+            if (candidate !in excluding) return candidate
+        }
+        return null
+    }
+
+    val hasUntriedFallbackSources = activeStreams.size > 1 &&
+        nextUntriedSourceIndex(failedSourceIndices + activeStreamIndex) != null
+
+    val selectSourceManually: (Int) -> Unit = { idx ->
+        failedSourceIndices = failedSourceIndices - idx
+        failoverStatusMessage = null
+        playerError = null
+        onSelectSourceIndex(idx)
+    }
+
+    val retryActiveChannelPlayback: () -> Unit = {
+        failedSourceIndices = emptySet()
+        failoverStatusMessage = null
+        playerError = null
+        playbackRetryNonce += 1
+    }
+
+    // Auto-failover imediato quando a fonte atual retorna erro de reprodução
+    LaunchedEffect(
+        activeChannel.id,
+        activeStreamIndex,
+        sourceUrl,
+        playerError,
+        activeStreams.size,
+        openingChannelId,
+    ) {
+        if (playerError == null || activeStreams.size <= 1 || openingChannelId != null) {
+            return@LaunchedEffect
+        }
+        delay(500L)
+        val updatedFailed = failedSourceIndices + activeStreamIndex
+        val nextIdx = nextUntriedSourceIndex(updatedFailed)
+        failedSourceIndices = updatedFailed
+        if (nextIdx != null) {
+            val currentLabel = formatBestCineTvSourceLabel(activeStreams.getOrNull(activeStreamIndex), activeStreamIndex)
+            val nextLabel = formatBestCineTvSourceLabel(activeStreams.getOrNull(nextIdx), nextIdx)
+            failoverStatusMessage = "$currentLabel indisponível — alternando para $nextLabel..."
+            playerError = null
+            onSelectSourceIndex(nextIdx)
+        } else {
+            failoverStatusMessage = null
+        }
+    }
+
+    // Auto-failover por timeout caso a fonte trave carregando sem nunca iniciar
+    LaunchedEffect(
+        activeChannel.id,
+        activeStreamIndex,
+        sourceUrl,
+        playbackRetryNonce,
+        hasPlayedCurrentSource,
+        playerError,
+        activeStreams.size,
+        openingChannelId,
+        isSelectedTab,
+        castState.isCasting,
+        castState.isConnecting,
+    ) {
+        if (
+            !isSelectedTab ||
+            sourceUrl.isBlank() ||
+            hasPlayedCurrentSource ||
+            playerError != null ||
+            activeStreams.size <= 1 ||
+            openingChannelId != null ||
+            castState.isCasting ||
+            castState.isConnecting
+        ) {
+            return@LaunchedEffect
+        }
+        delay(12_000L)
+        if (hasPlayedCurrentSource || snapshot.isPlaying || playerError != null) {
+            return@LaunchedEffect
+        }
+        val updatedFailed = failedSourceIndices + activeStreamIndex
+        val nextIdx = nextUntriedSourceIndex(updatedFailed)
+        failedSourceIndices = updatedFailed
+        if (nextIdx != null) {
+            val currentLabel = formatBestCineTvSourceLabel(activeStreams.getOrNull(activeStreamIndex), activeStreamIndex)
+            val nextLabel = formatBestCineTvSourceLabel(activeStreams.getOrNull(nextIdx), nextIdx)
+            failoverStatusMessage = "$currentLabel sem resposta — alternando para $nextLabel..."
+            onSelectSourceIndex(nextIdx)
+        } else {
+            failoverStatusMessage = null
+            playerError = "Nenhuma fonte respondeu no tempo limite."
+        }
+    }
+
+    // Oculta o aviso de alternância assim que a nova fonte estabiliza em reprodução
+    LaunchedEffect(failoverStatusMessage, snapshot.isPlaying) {
+        if (failoverStatusMessage != null && snapshot.isPlaying) {
+            delay(2600L)
+            failoverStatusMessage = null
+        }
+    }
 
     if (isSelectedTab && sourceUrl.isNotBlank()) {
         ManagePlayerPictureInPicture(
@@ -906,10 +1083,17 @@ private fun BestCineTvSplitPlayerLayout(
         PlayerResizeMode.Stretch -> "Stretch"
     }
     val speedLabel = if (playbackSpeed == 1f) "1x" else "${playbackSpeed}x"
+    val isSwitchingChannel = openingChannelId != null
+    val tuningMessage = if (isSwitchingChannel) {
+        if (!openingChannelName.isNullOrBlank()) "Sintonizando $openingChannelName..." else "Sintonizando canal..."
+    } else {
+        null
+    }
     val playerControlsState = PlayerControlsState(
-        title = activeChannel.name,
+        title = if (isSwitchingChannel && !openingChannelName.isNullOrBlank()) openingChannelName else activeChannel.name,
         episodeText = activeChannel.group,
-        streamTitle = activeEpgDetails?.nowLine
+        streamTitle = tuningMessage
+            ?: activeEpgDetails?.nowLine
             ?: activeChannel.epgSummary.lineSequence().map(String::trim).firstOrNull { it.isNotEmpty() }.orEmpty(),
         providerName = BestCineBranding.APP_NAME,
         pauseOverlayEnabled = false,
@@ -926,9 +1110,9 @@ private fun BestCineTvSplitPlayerLayout(
         themeAccentColor = "#1E6BFF",
         themeAccentStrongColor = "#4299FF",
         themeSelectedRingColor = "rgba(30, 107, 255, .38)",
-        isPlaying = snapshot.isPlaying,
-        isLoading = snapshot.isLoading,
-        controlsVisible = playerControlsVisible,
+        isPlaying = snapshot.isPlaying && !isSwitchingChannel,
+        isLoading = snapshot.isLoading || isSwitchingChannel || (!hasPlayedCurrentSource && playerError == null),
+        controlsVisible = playerControlsVisible || isSwitchingChannel,
         durationMs = snapshot.durationMs,
         positionMs = snapshot.positionMs,
         bufferedPositionMs = snapshot.bufferedPositionMs,
@@ -948,27 +1132,32 @@ private fun BestCineTvSplitPlayerLayout(
         label = "tv_split_row_spacing",
     )
 
-    Row(
+    BoxWithConstraints(
         modifier = Modifier.fillMaxSize(),
-        horizontalArrangement = Arrangement.spacedBy(rowSpacing),
     ) {
-        // ============================================================
-        // LISTA VERTICAL DOS CANAIS DO GRUPO (ZAPPING COM 1 CLIQUE)
-        // ============================================================
-        AnimatedVisibility(
-            visible = !isFullscreen && !isCompactMobile,
-            enter = fadeIn(tween(200)) + expandHorizontally(tween(220, easing = FastOutSlowInEasing)),
-            exit = fadeOut(tween(140)) + shrinkHorizontally(tween(220, easing = FastOutSlowInEasing)),
+        val workspaceWidth = maxWidth
+        val channelListWidth = (workspaceWidth * 0.36f).coerceIn(305.dp, 390.dp)
+        Row(
+            modifier = Modifier.fillMaxSize(),
+            horizontalArrangement = Arrangement.spacedBy(rowSpacing),
         ) {
-            Column(
-                modifier = Modifier
-                    .width(260.dp)
-                    .fillMaxHeight()
-                    .clip(RoundedCornerShape(14.dp))
-                    .background(Color(0xFF0E1422))
-                    .border(1.dp, Color.White.copy(alpha = 0.08f), RoundedCornerShape(14.dp))
-                    .padding(8.dp),
+            // ============================================================
+            // LISTA VERTICAL DOS CANAIS DO GRUPO (ZAPPING COM 1 CLIQUE)
+            // ============================================================
+            AnimatedVisibility(
+                visible = !isFullscreen && !isCompactMobile,
+                enter = fadeIn(tween(200)) + expandHorizontally(tween(220, easing = FastOutSlowInEasing)),
+                exit = fadeOut(tween(140)) + shrinkHorizontally(tween(220, easing = FastOutSlowInEasing)),
             ) {
+                Column(
+                    modifier = Modifier
+                        .width(channelListWidth)
+                        .fillMaxHeight()
+                        .clip(RoundedCornerShape(14.dp))
+                        .background(Color(0xFF0D1422))
+                        .border(1.dp, Color(0xFF22314A).copy(alpha = 0.72f), RoundedCornerShape(14.dp))
+                        .padding(8.dp),
+                ) {
                 Text(
                     text = "Canais do grupo (${channels.size})",
                     style = MaterialTheme.typography.labelMedium,
@@ -1105,25 +1294,35 @@ private fun BestCineTvSplitPlayerLayout(
             val previewHeight = if (isCompactMobile) {
                 (maxWidth * 9f / 16f).coerceIn(190.dp, 240.dp)
             } else {
-                (maxHeight * 0.44f).coerceIn(235.dp, 330.dp)
+                val aspectTarget = maxWidth * 9f / 16f
+                val maxAllowedForEpg = (maxHeight * 0.49f).coerceIn(245.dp, 385.dp)
+                minOf(aspectTarget, maxAllowedForEpg).coerceAtLeast(240.dp)
             }
             val animatedPlayerHeight by animateDpAsState(
                 targetValue = if (isFullscreen) maxHeight else previewHeight,
                 animationSpec = tween(durationMillis = 220, easing = FastOutSlowInEasing),
                 label = "tv_player_height",
             )
+            // No Desktop (HWND/SwingPanel retangular), usa moldura slim de 10dp com respiro
+            // simétrico de 8dp + linha interna de 1dp, mantendo o retângulo 100% encaixado sem
+            // jamais colidir com a quina curva. No Android/iOS aplica clip concêntrico real.
             val animatedCornerRadius by animateDpAsState(
-                targetValue = if (isFullscreen) 0.dp else 14.dp,
+                targetValue = if (isFullscreen) 0.dp else if (isDesktop) 10.dp else 14.dp,
                 animationSpec = tween(durationMillis = 220, easing = FastOutSlowInEasing),
                 label = "tv_player_corner_radius",
             )
+            val animatedInnerCornerRadius by animateDpAsState(
+                targetValue = if (isFullscreen || isDesktop) 0.dp else 10.dp,
+                animationSpec = tween(durationMillis = 220, easing = FastOutSlowInEasing),
+                label = "tv_player_inner_corner_radius",
+            )
             val animatedFramePadding by animateDpAsState(
-                targetValue = if (isFullscreen) 0.dp else 6.dp,
+                targetValue = if (isFullscreen) 0.dp else if (isDesktop) 8.dp else 4.dp,
                 animationSpec = tween(durationMillis = 220, easing = FastOutSlowInEasing),
                 label = "tv_player_frame_padding",
             )
             val animatedSpacing by animateDpAsState(
-                targetValue = if (isFullscreen) 0.dp else 10.dp,
+                targetValue = if (isFullscreen) 0.dp else 8.dp,
                 animationSpec = tween(durationMillis = 220, easing = FastOutSlowInEasing),
                 label = "tv_player_column_spacing",
             )
@@ -1141,14 +1340,14 @@ private fun BestCineTvSplitPlayerLayout(
                 modifier = Modifier.fillMaxSize(),
                 verticalArrangement = Arrangement.spacedBy(animatedSpacing),
             ) {
-                // Moldura moderna com borda arredondada visível ao redor do player nativo (HWND)
+                // Moldura moderna com encaixe limpo ao redor do player (sem quina invadindo a curva)
                 Surface(
                     shape = RoundedCornerShape(animatedCornerRadius),
-                    color = if (isFullscreen) Color.Black else Color(0xFF0E1422),
+                    color = if (isFullscreen) Color.Black else Color(0xFF0A101D),
                     border = if (isFullscreen) {
                         null
                     } else {
-                        BorderStroke(1.dp, Color.White.copy(alpha = 0.10f))
+                        BorderStroke(1.dp, Color(0xFF22314A).copy(alpha = 0.85f))
                     },
                     modifier = Modifier
                         .fillMaxWidth()
@@ -1158,7 +1357,21 @@ private fun BestCineTvSplitPlayerLayout(
                         modifier = Modifier
                             .fillMaxSize()
                             .padding(animatedFramePadding)
-                            .background(Color.Black),
+                            .then(
+                                if (!isFullscreen && !isDesktop) {
+                                    Modifier.clip(RoundedCornerShape(animatedInnerCornerRadius))
+                                } else {
+                                    Modifier
+                                },
+                            )
+                            .background(Color.Black)
+                            .then(
+                                if (!isFullscreen && isDesktop) {
+                                    Modifier.border(1.dp, Color.White.copy(alpha = 0.08f))
+                                } else {
+                                    Modifier
+                                },
+                            ),
                         contentAlignment = Alignment.Center,
                     ) {
                         val isCastingNow = castState.isCasting || castState.isConnecting
@@ -1171,7 +1384,7 @@ private fun BestCineTvSplitPlayerLayout(
                                 onBack = if (isFullscreen) onExitFullscreen else null,
                             )
                         } else if (isSelectedTab && sourceUrl.isNotBlank()) {
-                            key("${activeChannel.id}|$sourceUrl") {
+                            key("${activeChannel.id}|$sourceUrl|$playbackRetryNonce") {
                                 PlatformPlayerSurface(
                                     sourceUrl = sourceUrl,
                                     sourceHeaders = requestHeaders,
@@ -1288,12 +1501,40 @@ private fun BestCineTvSplitPlayerLayout(
                                     snapshot = snap
                                     if (snap.isPlaying) {
                                         playerError = null
+                                        hasPlayedCurrentSource = true
+                                        if (activeStreamIndex in failedSourceIndices) {
+                                            failedSourceIndices = failedSourceIndices - activeStreamIndex
+                                        }
                                     }
                                 },
                                 onError = { err -> playerError = err },
                             )
                         }
-                        if (playerError != null) {
+                        if (playerError != null && hasUntriedFallbackSources && openingChannelId == null) {
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxSize()
+                                    .background(Color(0xD9080C16))
+                                    .padding(horizontal = 20.dp),
+                                contentAlignment = Alignment.Center,
+                            ) {
+                                Column(
+                                    horizontalAlignment = Alignment.CenterHorizontally,
+                                    verticalArrangement = Arrangement.spacedBy(10.dp),
+                                ) {
+                                    NuvioLoadingIndicator(
+                                        size = 30.dp,
+                                        color = BestCineBranding.PrimaryBlueBright,
+                                    )
+                                    Text(
+                                        text = "Alternando para outra fonte...",
+                                        style = MaterialTheme.typography.titleSmall,
+                                        color = Color.White,
+                                        fontWeight = FontWeight.SemiBold,
+                                    )
+                                }
+                            }
+                        } else if (playerError != null) {
                             Box(
                                 modifier = Modifier
                                     .fillMaxSize()
@@ -1319,7 +1560,7 @@ private fun BestCineTvSplitPlayerLayout(
                                     )
                                     Text(
                                         text = if (activeStreams.size > 1) {
-                                            "Tente selecionar outra fonte abaixo ou escolha outro canal."
+                                            "Todas as fontes disponíveis foram testadas. Tente novamente ou escolha outro canal."
                                         } else {
                                             "Tente outra alternativa ou volte novamente mais tarde."
                                         },
@@ -1327,10 +1568,13 @@ private fun BestCineTvSplitPlayerLayout(
                                         color = tokens.colors.textMuted,
                                         textAlign = TextAlign.Center,
                                     )
-                                    if (isFullscreen) {
-                                        Spacer(modifier = Modifier.height(6.dp))
+                                    Spacer(modifier = Modifier.height(6.dp))
+                                    Row(
+                                        horizontalArrangement = Arrangement.spacedBy(10.dp),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                    ) {
                                         Button(
-                                            onClick = onExitFullscreen,
+                                            onClick = retryActiveChannelPlayback,
                                             shape = RoundedCornerShape(10.dp),
                                             colors = ButtonDefaults.buttonColors(
                                                 containerColor = BestCineBranding.PrimaryBlue,
@@ -1338,12 +1582,30 @@ private fun BestCineTvSplitPlayerLayout(
                                             ),
                                         ) {
                                             Icon(
-                                                imageVector = Icons.Rounded.FullscreenExit,
+                                                imageVector = Icons.Rounded.Refresh,
                                                 contentDescription = null,
                                                 modifier = Modifier.size(18.dp),
                                             )
                                             Spacer(modifier = Modifier.width(6.dp))
-                                            Text("Sair da tela cheia")
+                                            Text("Tentar novamente")
+                                        }
+                                        if (isFullscreen) {
+                                            Button(
+                                                onClick = onExitFullscreen,
+                                                shape = RoundedCornerShape(10.dp),
+                                                colors = ButtonDefaults.buttonColors(
+                                                    containerColor = Color.White.copy(alpha = 0.14f),
+                                                    contentColor = Color.White,
+                                                ),
+                                            ) {
+                                                Icon(
+                                                    imageVector = Icons.Rounded.FullscreenExit,
+                                                    contentDescription = null,
+                                                    modifier = Modifier.size(18.dp),
+                                                )
+                                                Spacer(modifier = Modifier.width(6.dp))
+                                                Text("Sair da tela cheia")
+                                            }
                                         }
                                     }
                                 }
@@ -1415,7 +1677,7 @@ private fun BestCineTvSplitPlayerLayout(
                                     controlsActivityTick += 1
                                 },
                                 onSelectSourceIndex = { idx ->
-                                    onSelectSourceIndex(idx)
+                                    selectSourceManually(idx)
                                     playerControlsVisible = true
                                     controlsActivityTick += 1
                                 },
@@ -1429,6 +1691,80 @@ private fun BestCineTvSplitPlayerLayout(
                                 },
                                 onExitFullscreen = onExitFullscreen,
                             )
+                        }
+                        val showInPlayerLoadingOverlay = !isDesktop &&
+                            !isCastingNow &&
+                            !isInPip &&
+                            playerError == null &&
+                            (isSwitchingChannel || (!snapshot.isPlaying && (snapshot.isLoading || !hasPlayedCurrentSource))) &&
+                            !(isFullscreen && playerControlsVisible && !isSwitchingChannel)
+
+                        androidx.compose.animation.AnimatedVisibility(
+                            visible = showInPlayerLoadingOverlay,
+                            enter = fadeIn(tween(150)),
+                            exit = fadeOut(tween(180)),
+                            modifier = Modifier.fillMaxSize(),
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxSize()
+                                    .background(if (isSwitchingChannel) Color(0x99060A13) else Color(0x66060A13)),
+                                contentAlignment = Alignment.Center,
+                            ) {
+                                Column(
+                                    horizontalAlignment = Alignment.CenterHorizontally,
+                                    verticalArrangement = Arrangement.spacedBy(10.dp),
+                                    modifier = Modifier.padding(horizontal = 20.dp),
+                                ) {
+                                    NuvioLoadingIndicator(
+                                        size = 34.dp,
+                                        color = BestCineBranding.PrimaryBlueBright,
+                                    )
+                                    Text(
+                                        text = tuningMessage ?: "Carregando ${activeChannel.name}...",
+                                        style = MaterialTheme.typography.labelLarge,
+                                        color = Color.White,
+                                        fontWeight = FontWeight.SemiBold,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis,
+                                    )
+                                }
+                            }
+                        }
+
+                        androidx.compose.animation.AnimatedVisibility(
+                            visible = failoverStatusMessage != null && playerError == null && !isInPip,
+                            enter = fadeIn(tween(180)),
+                            exit = fadeOut(tween(220)),
+                            modifier = Modifier
+                                .align(Alignment.TopCenter)
+                                .padding(top = if (isFullscreen) 18.dp else 10.dp, start = 16.dp, end = 16.dp),
+                        ) {
+                            Surface(
+                                shape = RoundedCornerShape(999.dp),
+                                color = Color(0xCC0B1220),
+                                border = BorderStroke(1.dp, BestCineBranding.PrimaryBlueBright.copy(alpha = 0.45f)),
+                            ) {
+                                Row(
+                                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                ) {
+                                    if (!snapshot.isPlaying) {
+                                        NuvioLoadingIndicator(
+                                            size = 14.dp,
+                                            color = BestCineBranding.PrimaryBlueBright,
+                                        )
+                                    }
+                                    Text(
+                                        text = failoverStatusMessage.orEmpty(),
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = Color.White,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis,
+                                    )
+                                }
+                            }
                         }
                     } else {
                         Text(
@@ -1450,21 +1786,21 @@ private fun BestCineTvSplitPlayerLayout(
                 ) {
                     Column(
                         modifier = Modifier.fillMaxSize(),
-                        verticalArrangement = Arrangement.spacedBy(10.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp),
                     ) {
                         // Barra compacta de controles + fontes
                         Surface(
-                            shape = RoundedCornerShape(14.dp),
-                            color = Color(0xFF0E1422),
-                            border = BorderStroke(1.dp, Color.White.copy(alpha = 0.08f)),
+                            shape = RoundedCornerShape(12.dp),
+                            color = Color(0xFF0D1422),
+                            border = BorderStroke(1.dp, Color(0xFF22314A).copy(alpha = 0.72f)),
                             modifier = Modifier.fillMaxWidth(),
                         ) {
                             Column(
                                 modifier = Modifier.padding(
-                                    horizontal = if (isCompactMobile) 10.dp else 14.dp,
-                                    vertical = if (isCompactMobile) 8.dp else 10.dp,
+                                    horizontal = if (isCompactMobile) 10.dp else 12.dp,
+                                    vertical = if (isCompactMobile) 8.dp else 7.dp,
                                 ),
-                                verticalArrangement = Arrangement.spacedBy(6.dp),
+                                verticalArrangement = Arrangement.spacedBy(5.dp),
                             ) {
                                 if (isCompactMobile) {
                                     // Layout Mobile Compacto: Linha 1 = Nome do Canal + AO VIVO + Fechar (X)
@@ -1635,20 +1971,22 @@ private fun BestCineTvSplitPlayerLayout(
                                         }
                                     }
                                 } else {
-                                    // Layout Desktop / Tablet (1 linha horizontal ampla)
+                                    // Layout Desktop / Tablet (1 linha horizontal enxuta)
                                     Row(
                                         modifier = Modifier.fillMaxWidth(),
                                         verticalAlignment = Alignment.CenterVertically,
-                                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                        horizontalArrangement = Arrangement.spacedBy(4.dp),
                                     ) {
                                         IconButton(
                                             onClick = onPreviousChannel,
                                             enabled = openingChannelId == null,
+                                            modifier = Modifier.size(34.dp),
                                         ) {
                                             Icon(
                                                 imageVector = Icons.Rounded.SkipPrevious,
                                                 contentDescription = "Canal anterior",
                                                 tint = tokens.colors.textPrimary,
+                                                modifier = Modifier.size(20.dp),
                                             )
                                         }
 
@@ -1657,22 +1995,26 @@ private fun BestCineTvSplitPlayerLayout(
                                                 val c = controller ?: return@IconButton
                                                 if (snapshot.isPlaying) c.pause() else c.play()
                                             },
+                                            modifier = Modifier.size(34.dp),
                                         ) {
                                             Icon(
                                                 imageVector = if (snapshot.isPlaying) Icons.Rounded.Pause else Icons.Rounded.PlayArrow,
                                                 contentDescription = if (snapshot.isPlaying) "Pausar" else "Reproduzir",
                                                 tint = BestCineBranding.PrimaryBlueBright,
+                                                modifier = Modifier.size(22.dp),
                                             )
                                         }
 
                                         IconButton(
                                             onClick = onNextChannel,
                                             enabled = openingChannelId == null,
+                                            modifier = Modifier.size(34.dp),
                                         ) {
                                             Icon(
                                                 imageVector = Icons.Rounded.SkipNext,
                                                 contentDescription = "Próximo canal",
                                                 tint = tokens.colors.textPrimary,
+                                                modifier = Modifier.size(20.dp),
                                             )
                                         }
 
@@ -1681,11 +2023,13 @@ private fun BestCineTvSplitPlayerLayout(
                                                 isMuted = !isMuted
                                                 controller?.setMuted(isMuted)
                                             },
+                                            modifier = Modifier.size(34.dp),
                                         ) {
                                             Icon(
                                                 imageVector = if (isMuted) Icons.Rounded.VolumeOff else Icons.Rounded.VolumeUp,
                                                 contentDescription = if (isMuted) "Ativar som" else "Silenciar",
                                                 tint = tokens.colors.textPrimary,
+                                                modifier = Modifier.size(20.dp),
                                             )
                                         }
 
@@ -1703,6 +2047,7 @@ private fun BestCineTvSplitPlayerLayout(
                                                 fontWeight = FontWeight.Bold,
                                                 maxLines = 1,
                                                 overflow = TextOverflow.Ellipsis,
+                                                modifier = Modifier.weight(1f, fill = false),
                                             )
                                             Box(
                                                 modifier = Modifier
@@ -1722,53 +2067,66 @@ private fun BestCineTvSplitPlayerLayout(
                                         val activeIsFavoriteDesktop = activeChannel.id in favoriteChannelIds
                                         IconButton(
                                             onClick = { onToggleFavoriteChannel(activeChannel.id) },
+                                            modifier = Modifier.size(34.dp),
                                         ) {
                                             Icon(
                                                 imageVector = if (activeIsFavoriteDesktop) Icons.Rounded.Star else Icons.Rounded.StarBorder,
                                                 contentDescription = if (activeIsFavoriteDesktop) "Remover favorito" else "Favoritar canal",
                                                 tint = if (activeIsFavoriteDesktop) Color(0xFFFFCA28) else tokens.colors.textPrimary,
+                                                modifier = Modifier.size(19.dp),
                                             )
                                         }
 
                                         IconButton(
                                             onClick = { showCastDialog = true },
+                                            modifier = Modifier.size(34.dp),
                                         ) {
                                             Icon(
                                                 imageVector = if (castState.isCasting) Icons.Rounded.CastConnected else Icons.Rounded.Cast,
                                                 contentDescription = "Transmitir para TV",
                                                 tint = if (castState.isCasting) BestCineBranding.PrimaryBlueBright else tokens.colors.textPrimary,
+                                                modifier = Modifier.size(19.dp),
                                             )
                                         }
 
                                         IconButton(
                                             onClick = { togglePlayerPictureInPicture() },
+                                            modifier = Modifier.size(34.dp),
                                         ) {
                                             Icon(
                                                 imageVector = Icons.Rounded.PictureInPictureAlt,
                                                 contentDescription = "Picture-in-Picture",
                                                 tint = if (isInPip) BestCineBranding.PrimaryBlueBright else tokens.colors.textPrimary,
+                                                modifier = Modifier.size(19.dp),
                                             )
                                         }
 
+                                        Spacer(modifier = Modifier.width(2.dp))
+
                                         Button(
                                             onClick = onEnterFullscreen,
-                                            shape = RoundedCornerShape(10.dp),
-                                            contentPadding = PaddingValues(horizontal = 14.dp, vertical = 8.dp),
+                                            shape = RoundedCornerShape(9.dp),
+                                            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 0.dp),
+                                            modifier = Modifier.height(34.dp),
                                             colors = ButtonDefaults.buttonColors(
                                                 containerColor = BestCineBranding.PrimaryBlue,
                                                 contentColor = Color.White,
                                             ),
                                         ) {
-                                            Icon(Icons.Rounded.Fullscreen, contentDescription = null, modifier = Modifier.size(18.dp))
-                                            Spacer(modifier = Modifier.width(6.dp))
-                                            Text("Tela cheia", style = MaterialTheme.typography.labelLarge)
+                                            Icon(Icons.Rounded.Fullscreen, contentDescription = null, modifier = Modifier.size(17.dp))
+                                            Spacer(modifier = Modifier.width(5.dp))
+                                            Text("Tela cheia", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.SemiBold)
                                         }
 
-                                        IconButton(onClick = onClosePlayer) {
+                                        IconButton(
+                                            onClick = onClosePlayer,
+                                            modifier = Modifier.size(34.dp),
+                                        ) {
                                             Icon(
                                                 imageVector = Icons.Rounded.Close,
                                                 contentDescription = "Fechar player",
                                                 tint = tokens.colors.textMuted,
+                                                modifier = Modifier.size(19.dp),
                                             )
                                         }
                                     }
@@ -1801,13 +2159,9 @@ private fun BestCineTvSplitPlayerLayout(
                                         )
                                         activeStreams.forEachIndexed { idx, stream ->
                                             val selected = idx == activeStreamIndex
-                                            val label = stream.name
-                                                ?.replace("\n", " ")
-                                                ?.trim()
-                                                ?.takeIf { it.isNotEmpty() }
-                                                ?: "Fonte ${idx + 1}"
+                                            val label = formatBestCineTvSourceLabel(stream, idx)
                                             Surface(
-                                                onClick = { onSelectSourceIndex(idx) },
+                                                onClick = { selectSourceManually(idx) },
                                                 shape = RoundedCornerShape(8.dp),
                                                 color = if (selected) BestCineBranding.PrimaryBlue else Color.White.copy(alpha = 0.06f),
                                                 border = BorderStroke(
@@ -1846,6 +2200,7 @@ private fun BestCineTvSplitPlayerLayout(
                 }
             }
         }
+    }
     }
 
     BestCineCastDialog(
@@ -2253,6 +2608,13 @@ private fun BestCineEpgProgressBar(
     }
 }
 
+private fun formatBestCineTvSourceLabel(stream: StreamItem?, index: Int): String =
+    stream?.name
+        ?.replace("\n", " ")
+        ?.trim()
+        ?.takeIf { it.isNotEmpty() }
+        ?: "Fonte ${index + 1}"
+
 @Composable
 private fun BestCineTvMobileFullscreenOverlay(
     channelName: String,
@@ -2281,15 +2643,162 @@ private fun BestCineTvMobileFullscreenOverlay(
     onExitFullscreen: () -> Unit,
 ) {
     val safePadding = WindowInsets.safeDrawing.asPaddingValues()
+    val density = LocalDensity.current
+    val layoutDirection = LocalLayoutDirection.current
+    val horizontalSafePadding = maxOf(
+        safePadding.calculateLeftPadding(layoutDirection),
+        safePadding.calculateRightPadding(layoutDirection),
+    )
+    val playerSettings by remember {
+        PlayerSettingsRepository.ensureLoaded()
+        PlayerSettingsRepository.uiState
+    }.collectAsStateWithLifecycle()
+    val gestureController = rememberPlayerGestureController(
+        restoreBrightness = playerSettings.touchGesturesEnabled,
+    )
+    val sideGestureSystemEdgeExclusionPx = with(density) {
+        PlayerSideGestureSystemEdgeExclusion.toPx()
+    }
+    val gestureScope = rememberCoroutineScope()
+    var gestureFeedback by remember { mutableStateOf<GestureFeedbackState?>(null) }
+    var renderedGestureFeedback by remember { mutableStateOf<GestureFeedbackState?>(null) }
+    var gestureFeedbackJob by remember { mutableStateOf<Job?>(null) }
+
+    val showGestureFeedback: (GestureFeedbackState) -> Unit = { feedback ->
+        gestureFeedbackJob?.cancel()
+        gestureFeedback = feedback
+        renderedGestureFeedback = feedback
+        gestureFeedbackJob = gestureScope.launch {
+            delay(900L)
+            gestureFeedback = null
+        }
+    }
+    val showBrightnessFeedback: (Float) -> Unit = { level ->
+        val clamped = level.coerceIn(0f, 1f)
+        val percentage = (clamped * 100f).roundToInt()
+        showGestureFeedback(
+            GestureFeedbackState(
+                messageRes = Res.string.compose_player_brightness_level,
+                messageArgs = listOf("$percentage%"),
+                icon = GestureFeedbackIcon.Brightness,
+                level = clamped,
+            ),
+        )
+    }
+    val showVolumeFeedback: (PlayerAudioLevel) -> Unit = { audio ->
+        val clamped = audio.fraction.coerceIn(0f, 1f)
+        val percentage = (clamped * 100f).roundToInt()
+        showGestureFeedback(
+            GestureFeedbackState(
+                messageRes = if (audio.isMuted) {
+                    Res.string.compose_player_muted
+                } else {
+                    Res.string.compose_player_volume_level
+                },
+                messageArgs = if (audio.isMuted) emptyList() else listOf("$percentage%"),
+                icon = if (audio.isMuted) GestureFeedbackIcon.VolumeMuted else GestureFeedbackIcon.Volume,
+                isDanger = audio.isMuted,
+                level = if (audio.isMuted) 0f else clamped,
+            ),
+        )
+    }
+
+    val onToggleControlsState = rememberUpdatedState(onToggleControls)
+    val touchGesturesEnabledState = rememberUpdatedState(playerSettings.touchGesturesEnabled)
+    val showBrightnessFeedbackState = rememberUpdatedState(showBrightnessFeedback)
+    val showVolumeFeedbackState = rememberUpdatedState(showVolumeFeedback)
 
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .clickable(
-                interactionSource = remember { MutableInteractionSource() },
-                indication = null,
-                onClick = onToggleControls,
-            ),
+            .pointerInput(gestureController, sideGestureSystemEdgeExclusionPx) {
+                val controller = gestureController ?: return@pointerInput
+                awaitEachGesture {
+                    val down = awaitFirstDown(requireUnconsumed = true)
+                    if (!touchGesturesEnabledState.value) {
+                        return@awaitEachGesture
+                    }
+                    val width = size.width.toFloat().takeIf { it > 0f } ?: return@awaitEachGesture
+                    val height = size.height.toFloat().takeIf { it > 0f } ?: return@awaitEachGesture
+                    val edgeExclusionPx = sideGestureSystemEdgeExclusionPx.coerceAtMost(height * 0.25f)
+                    if (down.position.y <= edgeExclusionPx || down.position.y >= height - edgeExclusionPx) {
+                        return@awaitEachGesture
+                    }
+                    val region = when {
+                        down.position.x < width * PlayerLeftGestureBoundary -> PlayerSideGesture.Brightness
+                        down.position.x > width * PlayerRightGestureBoundary -> PlayerSideGesture.Volume
+                        else -> null
+                    } ?: return@awaitEachGesture
+
+                    val initialBrightness = if (region == PlayerSideGesture.Brightness) {
+                        controller.currentBrightness()
+                    } else {
+                        null
+                    }
+                    val initialVolume = if (region == PlayerSideGesture.Volume) {
+                        controller.currentVolume()
+                    } else {
+                        null
+                    }
+                    if (region == PlayerSideGesture.Brightness && initialBrightness == null) {
+                        return@awaitEachGesture
+                    }
+                    if (region == PlayerSideGesture.Volume && initialVolume == null) {
+                        return@awaitEachGesture
+                    }
+
+                    var totalDx = 0f
+                    var totalDy = 0f
+                    var activeSideGesture: PlayerSideGesture? = null
+                    var activationDy = 0f
+
+                    while (true) {
+                        val event = awaitPointerEvent()
+                        val change = event.changes.firstOrNull { it.id == down.id } ?: break
+                        if (!change.pressed || change.isConsumed) break
+
+                        val delta = change.position - change.previousPosition
+                        totalDx += delta.x
+                        totalDy += delta.y
+
+                        if (activeSideGesture == null) {
+                            val activationSlop = maxOf(
+                                viewConfiguration.touchSlop * PlayerVerticalGestureTouchSlopMultiplier,
+                                height * PlayerVerticalGestureMinHeightFraction,
+                            )
+                            if (
+                                abs(totalDy) > activationSlop &&
+                                abs(totalDy) > abs(totalDx) * PlayerVerticalGestureDominanceRatio
+                            ) {
+                                activeSideGesture = region
+                                activationDy = totalDy
+                            } else {
+                                continue
+                            }
+                        }
+
+                        val activeDy = totalDy - activationDy
+                        val deltaFraction = (-activeDy / height) * PlayerVerticalGestureSensitivity
+                        when (activeSideGesture) {
+                            PlayerSideGesture.Brightness -> {
+                                controller.setBrightness((initialBrightness ?: 0f) + deltaFraction)
+                                    ?.let { level -> showBrightnessFeedbackState.value(level) }
+                            }
+                            PlayerSideGesture.Volume -> {
+                                controller.setVolume((initialVolume?.fraction ?: 0f) + deltaFraction)
+                                    ?.let { audio -> showVolumeFeedbackState.value(audio) }
+                            }
+                            null -> Unit
+                        }
+                        change.consume()
+                    }
+                }
+            }
+            .pointerInput(Unit) {
+                detectTapGestures(
+                    onTap = { onToggleControlsState.value() },
+                )
+            },
     ) {
         AnimatedVisibility(
             visible = controlsVisible,
@@ -2583,5 +3092,13 @@ private fun BestCineTvMobileFullscreenOverlay(
                 }
             }
         }
+
+        PlayerGestureOverlay(
+            currentFeedback = gestureFeedback,
+            renderedFeedback = renderedGestureFeedback,
+            useLegacyLayout = playerSettings.useLegacyPlayerLayout,
+            horizontalSafePadding = horizontalSafePadding,
+            horizontalPadding = 18.dp,
+        )
     }
 }

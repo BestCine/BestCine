@@ -169,6 +169,7 @@ data class BestCineRuntimeCatalog(
 )
 
 data class BestCineStreamingCatalogConfig(
+    val releasesCatalogEnabled: Boolean = true,
     val momentCatalogEnabled: Boolean = true,
     val seasonalCatalogEnabled: Boolean = true,
     val runtimeCatalogsEnabled: Boolean = false,
@@ -180,6 +181,8 @@ data class BestCineStreamingCatalogConfig(
 ) {
     val signature: String
         get() = buildString {
+            append(releasesCatalogEnabled)
+            append('|')
             append(momentCatalogEnabled)
             append('|')
             append(seasonalCatalogEnabled)
@@ -209,6 +212,8 @@ data class BestCineDiscoverCatalogSpec(
 object BestCineStreamingCatalogs {
     const val MANIFEST_URL = "bestcine://streaming-catalogs-br"
     const val DISCOVER_MANIFEST_URL = "bestcine://discover-br"
+    const val RELEASES_MOVIES_CATALOG_ID = "lancamentos_filmes"
+    const val RELEASES_SERIES_CATALOG_ID = "lancamentos_series"
     const val MOMENT_CATALOG_ID = "sessao_momento"
     const val SEASONAL_CATALOG_ID = "especial_sazonal"
     const val RUNTIME_QUICK_MOVIES_ID = "tempo_rapidos"
@@ -457,6 +462,34 @@ object BestCineStreamingCatalogs {
 
     fun buildHomeDefinitions(config: BestCineStreamingCatalogConfig): List<HomeCatalogDefinition> {
         return buildList {
+            if (config.releasesCatalogEnabled) {
+                add(
+                    HomeCatalogDefinition(
+                        key = "${KEY_PREFIX}movie:$RELEASES_MOVIES_CATALOG_ID",
+                        defaultTitle = "Filmes • Lançamentos",
+                        catalogName = "Filmes • Lançamentos",
+                        addonName = "BestCine Lançamentos",
+                        manifestUrl = MANIFEST_URL,
+                        type = "movie",
+                        catalogId = RELEASES_MOVIES_CATALOG_ID,
+                        supportsPagination = true,
+                        descriptorSignature = "bestcine_lancamentos_movie_v1",
+                    ),
+                )
+                add(
+                    HomeCatalogDefinition(
+                        key = "${KEY_PREFIX}series:$RELEASES_SERIES_CATALOG_ID",
+                        defaultTitle = "Séries • Lançamentos",
+                        catalogName = "Séries • Lançamentos",
+                        addonName = "BestCine Lançamentos",
+                        manifestUrl = MANIFEST_URL,
+                        type = "series",
+                        catalogId = RELEASES_SERIES_CATALOG_ID,
+                        supportsPagination = true,
+                        descriptorSignature = "bestcine_lancamentos_series_v1",
+                    ),
+                )
+            }
             if (config.momentCatalogEnabled) {
                 val period = currentMomentPeriod()
                 add(
@@ -731,12 +764,18 @@ object BestCineStreamingCatalogs {
         page: Int,
         forceRefresh: Boolean,
     ): CatalogPage = withContext(Dispatchers.Default) {
+        val isReleasesMovies = providerId.equals(RELEASES_MOVIES_CATALOG_ID, ignoreCase = true)
+        val isReleasesSeries = providerId.equals(RELEASES_SERIES_CATALOG_ID, ignoreCase = true)
         val isMomentCatalog = providerId.equals(MOMENT_CATALOG_ID, ignoreCase = true)
         val isSeasonalCatalog = providerId.equals(SEASONAL_CATALOG_ID, ignoreCase = true)
-        val runtimeCatalog = if (!isMomentCatalog && !isSeasonalCatalog) runtimeCatalogById(providerId) else null
-        val provider = if (!isMomentCatalog && !isSeasonalCatalog && runtimeCatalog == null) providerById(providerId) else null
+        val runtimeCatalog = if (!isReleasesMovies && !isReleasesSeries && !isMomentCatalog && !isSeasonalCatalog) {
+            runtimeCatalogById(providerId)
+        } else null
+        val provider = if (!isReleasesMovies && !isReleasesSeries && !isMomentCatalog && !isSeasonalCatalog && runtimeCatalog == null) {
+            providerById(providerId)
+        } else null
         val seasonalEvent = if (isSeasonalCatalog) currentSeasonalEvent() else null
-        if (!isMomentCatalog && seasonalEvent == null && runtimeCatalog == null && provider == null) {
+        if (!isReleasesMovies && !isReleasesSeries && !isMomentCatalog && seasonalEvent == null && runtimeCatalog == null && provider == null) {
             return@withContext CatalogPage(items = emptyList(), rawItemCount = 0, nextSkip = null)
         }
 
@@ -747,7 +786,8 @@ object BestCineStreamingCatalogs {
         }
 
         val isSeries = when {
-            isMomentCatalog || isSeasonalCatalog -> false
+            isReleasesSeries -> true
+            isReleasesMovies || isMomentCatalog || isSeasonalCatalog -> false
             runtimeCatalog != null -> runtimeCatalog.type == "series"
             else -> type.equals("series", ignoreCase = true) || type.equals("tv", ignoreCase = true)
         }
@@ -755,6 +795,8 @@ object BestCineStreamingCatalogs {
         val language = normalizeTmdbLanguage(TmdbSettingsRepository.snapshot().language).ifBlank { "pt-BR" }
         val momentPeriod = if (isMomentCatalog) currentMomentPeriod() else null
         val cacheId = when {
+            isReleasesMovies -> RELEASES_MOVIES_CATALOG_ID
+            isReleasesSeries -> RELEASES_SERIES_CATALOG_ID
             momentPeriod != null -> "${MOMENT_CATALOG_ID}_${momentPeriod.id}"
             seasonalEvent != null -> "${SEASONAL_CATALOG_ID}_${seasonalEvent.id}"
             runtimeCatalog != null -> runtimeCatalog.id
@@ -780,6 +822,19 @@ object BestCineStreamingCatalogs {
             "page" to page.toString(),
         ).apply {
             when {
+                isReleasesMovies -> {
+                    val todayIso = CurrentDateProvider.todayIsoDate()
+                    put("region", WATCH_REGION_BR)
+                    put("primary_release_date.gte", shiftIsoDateMonthsBack(todayIso, monthsBack = 4))
+                    put("primary_release_date.lte", todayIso)
+                    put("vote_count.gte", "25")
+                }
+                isReleasesSeries -> {
+                    val todayIso = CurrentDateProvider.todayIsoDate()
+                    put("first_air_date.gte", shiftIsoDateMonthsBack(todayIso, monthsBack = 6))
+                    put("first_air_date.lte", todayIso)
+                    put("vote_count.gte", "15")
+                }
                 momentPeriod != null -> {
                     put("region", WATCH_REGION_BR)
                     put("vote_average.gte", momentPeriod.minVoteAverage)
@@ -889,7 +944,50 @@ object BestCineStreamingCatalogs {
             popularity = popularity,
             voteCount = voteCount,
             imdbRating = voteAverage?.takeIf { it > 0.0 }?.let { ((it * 10).roundToInt() / 10.0).toString() },
+            genres = genreIds.mapNotNull { TMDB_GENRE_NAMES_PT[it] },
         )
+    }
+
+    private val TMDB_GENRE_NAMES_PT = mapOf(
+        28 to "Ação",
+        12 to "Aventura",
+        16 to "Animação",
+        35 to "Comédia",
+        80 to "Crime",
+        99 to "Documentário",
+        18 to "Drama",
+        10751 to "Família",
+        14 to "Fantasia",
+        36 to "História",
+        27 to "Terror",
+        10402 to "Música",
+        9648 to "Mistério",
+        10749 to "Romance",
+        878 to "Sci-Fi",
+        10770 to "Filme TV",
+        53 to "Suspense",
+        10752 to "Guerra",
+        37 to "Faroeste",
+        10759 to "Ação",
+        10762 to "Infantil",
+        10763 to "Notícias",
+        10764 to "Reality",
+        10765 to "Sci-Fi",
+        10766 to "Novela",
+        10767 to "Talk Show",
+        10768 to "Guerra",
+    )
+
+    private fun shiftIsoDateMonthsBack(todayIso: String, monthsBack: Int): String {
+        val parts = todayIso.split("-")
+        var year = parts.getOrNull(0)?.toIntOrNull() ?: 2026
+        var month = (parts.getOrNull(1)?.toIntOrNull() ?: 1) - monthsBack
+        while (month <= 0) {
+            month += 12
+            year -= 1
+        }
+        val mm = month.toString().padStart(2, '0')
+        return "$year-$mm-01"
     }
 
     private fun tmdbImageUrl(path: String?, size: String): String? {
@@ -932,4 +1030,5 @@ private data class TmdbStreamingDiscoverItem(
     val popularity: Double? = null,
     @SerialName("vote_count") val voteCount: Int? = null,
     @SerialName("vote_average") val voteAverage: Double? = null,
+    @SerialName("genre_ids") val genreIds: List<Int> = emptyList(),
 )
